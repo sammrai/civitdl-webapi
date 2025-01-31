@@ -89,6 +89,8 @@ jobs:
         with:
           path: pages
           name: github-pages
+          if-no-files-found: ignore
+          retention-days: 1
 
   documentation-deployment:
     needs: generate-redoc
@@ -110,6 +112,8 @@ jobs:
         with:
           path: "./artifacts"
           name: github-pages-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 1
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
