@@ -3,7 +3,7 @@ from civitdl.args.argparser import get_args
 from civitdl.batch._metadata import Metadata
 from civitdl.batch.batch_download import batch_download, BatchOptions
 from civitdl.batch._model import Model
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, APIRouter
 from helpers.sourcemanager import SourceManager
 from helpers.core.utils import APIException
 from pydantic import BaseModel
@@ -178,8 +178,19 @@ def _civitdl(model_id, version_id=None, api_key=None):
 
 app = FastAPI()
 
+# --- Routers ---
+versions_router = APIRouter(
+    prefix="/models/{model_id}/versions",
+    tags=["versions"]
+)
+
+models_router = APIRouter(
+    prefix="/models",
+    tags=["models"]
+)
+
 # --- Endpoints ---
-@app.get("/models/", response_model=List[ModelInfo])
+@models_router.get("/", response_model=List[ModelInfo])
 def list_models():
     """
     Retrieve a list of all saved models.
@@ -187,7 +198,7 @@ def list_models():
     models = find_model_files(None, None)
     return [ModelInfo(**model.__dict__) for model in models]
 
-@app.get("/models/{model_id}", response_model=List[ModelInfo])
+@models_router.get("/{model_id}", response_model=List[ModelInfo])
 def get_model(model_id: int):
     """
     Retrieve model information for the specified model_id.
@@ -200,7 +211,7 @@ def get_model(model_id: int):
     raise HTTPException(status_code=404, detail="Model not found")
 
 
-@app.post("/models/{model_id}", response_model=DownloadResponse)
+@models_router.post("/{model_id}", response_model=DownloadResponse)
 def download_model(model_id: int):
     """
     Download the model for the specified model_id.
@@ -208,7 +219,7 @@ def download_model(model_id: int):
     result = _civitdl(model_id, version_id=None, api_key=civitai_token)
     return DownloadResponse(**result)
 
-@app.delete("/models/{model_id}", response_model=List[ModelInfo])
+@models_router.delete("/{model_id}", response_model=List[ModelInfo])
 def remove_model(model_id: int):
     """
     Delete the model file for the specified model_id and version_id.
@@ -219,7 +230,7 @@ def remove_model(model_id: int):
     else:
         raise HTTPException(status_code=404, detail="Model file not found")
 
-@app.get("/models/{model_id}/versions/{version_id}", response_model=List[ModelInfo])
+@versions_router.get("/{version_id}", response_model=List[ModelInfo])
 def get_model_version(model_id: int, version_id: int):
     """
     Retrieve model information for the specified model_id and version_id.
@@ -231,7 +242,7 @@ def get_model_version(model_id: int, version_id: int):
         return matched_models
     raise HTTPException(status_code=404, detail="Model version not found")
 
-@app.post("/models/{model_id}/versions/{version_id}", response_model=DownloadResponse)
+@versions_router.post("/{version_id}", response_model=DownloadResponse)
 def download_model_version(model_id: int, version_id: int):
     """
     Download the model for the specified model_id and version_id.
@@ -239,7 +250,7 @@ def download_model_version(model_id: int, version_id: int):
     result = _civitdl(model_id, version_id=version_id, api_key=civitai_token)
     return DownloadResponse(**result)
 
-@app.delete("/models/{model_id}/versions/{version_id}", response_model=List[ModelInfo])
+@versions_router.delete("/{version_id}", response_model=List[ModelInfo])
 def remove_model_version(model_id: int, version_id: int):
     """
     Delete the model file for the specified model_id and version_id.
@@ -250,7 +261,7 @@ def remove_model_version(model_id: int, version_id: int):
     else:
         raise HTTPException(status_code=404, detail="Model version file not found")
 
-@app.delete("/models/", response_model=List[ModelInfo])
+@models_router.delete("/", response_model=List[ModelInfo])
 def remove_all_models():
     """
     Delete all saved model files.
@@ -260,3 +271,6 @@ def remove_all_models():
         return [ModelInfo(**model.__dict__) for model in success]
     else:
         raise HTTPException(status_code=404, detail="No model files found"+MODEL_ROOT_PATH)
+
+app.include_router(models_router)
+app.include_router(versions_router)
