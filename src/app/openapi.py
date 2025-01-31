@@ -1,9 +1,8 @@
 from fastapi.openapi.utils import get_openapi
-from main import app
+from app.main import app
 import json
 import yaml
 import argparse
-import os
 
 def generate_openapi(output_file, output_format="yaml"):
     openapi_schema = get_openapi(

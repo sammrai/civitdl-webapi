@@ -72,6 +72,8 @@ def find_model_files(model_id: Optional[int] = None, version_id: Optional[int] =
     models = []
 
     for root, _, files in os.walk(MODEL_ROOT_PATH):
+        if ".tmp" in root:
+            continue
         for file in files:
             match = model_pattern.match(file)
             if match:
@@ -91,7 +93,6 @@ def find_model_files(model_id: Optional[int] = None, version_id: Optional[int] =
                         with open(extra_data_dir_path, 'r', encoding='utf-8') as f:
                             data = json.load(f)
                             model_type = data.get("type", "").lower()
-
                     models.append(ModelInfo(
                         model_id=found_model_id,
                         version_id=found_version_id,
@@ -105,14 +106,11 @@ def find_model_files(model_id: Optional[int] = None, version_id: Optional[int] =
 
 def delete_model_files(model_id: Optional[int] = None, version_id: Optional[int] = None) -> List[ModelInfo]:
     """Delete model files and corresponding directories recursively"""
-    print("#3", model_id, version_id)
     models_to_delete = find_model_files(model_id, version_id)
-    print("#1", models_to_delete)
     if not models_to_delete:
         return []  # No matching models found
     for model in models_to_delete:
         shutil.rmtree(model.model_dir, ignore_errors=True)  # Recursively delete model directory
-    print("#2", models_to_delete)
 
     return models_to_delete
 
