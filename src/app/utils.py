@@ -105,21 +105,20 @@ def find_model_files(model_id: Optional[int] = None, version_id: Optional[int] =
 
 def delete_model_files(model_id: Optional[int] = None, version_id: Optional[int] = None) -> List[ModelInfo]:
     """Delete model files and corresponding directories recursively"""
+    print("#3", model_id, version_id)
     models_to_delete = find_model_files(model_id, version_id)
-    # print(models_to_delete)
+    print("#1", models_to_delete)
     if not models_to_delete:
-        print("@@@@@@@@@")
         return []  # No matching models found
-
     for model in models_to_delete:
-        print("deleteing...", model)
         shutil.rmtree(model.model_dir, ignore_errors=True)  # Recursively delete model directory
+    print("#2", models_to_delete)
 
     return models_to_delete
 
 
 def _civitdl(model_id, version_id=None, api_key=None):
-    paths = find_model_files(None, None)
+    paths = find_model_files(model_id, None)
     for model in paths:
         if model.model_id == model_id and model.version_id == version_id:
             raise HTTPException(status_code=304, detail="Model already downloaded.")
@@ -144,7 +143,10 @@ def _civitdl(model_id, version_id=None, api_key=None):
             rootdir=root_dir,
             batchOptions=BatchOptions(**args.__dict__)
         )
-        return {"model_id": int(metadata["model_id"]), "version_id": int(metadata["version_id"]), "model_dir": output_dir, "model_type": model_type}
+        ret = find_model_files(int(metadata["model_id"]), int(metadata["version_id"]))
+        assert len(ret) == 1
+        return ret[0]
+
     except APIException as e:
         raise HTTPException(status_code=404, detail=str(e))
     except AssertionError as e:

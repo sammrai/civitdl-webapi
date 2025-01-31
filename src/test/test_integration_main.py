@@ -89,14 +89,17 @@ def test_get_model(client, model):
         url += f"/versions/{version_id}"
 
     response = client.get(url)
+    data = response.json()
+
+    if version_id is None:
+        print("#",data)
+        data = data[0]
     
     if response.status_code == status.HTTP_200_OK:
-        data = response.json()
-        print("#", data)
-        assert data[0]["model_id"] == (model_id)
-        assert data[0]["model_type"] == (model_type)
+        assert data["model_id"] == (model_id)
+        assert data["model_type"] == (model_type)
         if version_id is not None:
-            assert data[0]["version_id"] == version_id
+            assert data["version_id"] == version_id
     else:
         pytest.fail(f"Model {model_id} not found when it should exist.")
 
@@ -127,12 +130,15 @@ def test_delete_model(client, model):
         url += f"/versions/{version_id}"
 
     response = client.delete(url)
-    print("#", response.text)
+    data = response.json()
+
+    if version_id is None:
+        data = data[0]
+    
     if response.status_code == status.HTTP_200_OK:
-        data = response.json()
-        assert data[0]["model_id"] == model_id
+        assert data["model_id"] == model_id
         if version_id is not None:
-            assert data[0]["version_id"] == version_id
+            assert data["version_id"] == version_id
     else:
         pytest.fail(f"Failed to delete model {model_id}")
     

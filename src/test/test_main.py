@@ -82,6 +82,7 @@ def test_download_model_success(mock_civitdl):
         "version_id": 1,
         "model_dir": "folder1",
         "model_type": "lora",
+        "filename": "example.safetensors"
     }
 
     response = client.post("/models/546949/versions/1")
@@ -91,6 +92,7 @@ def test_download_model_success(mock_civitdl):
         "version_id": 1,
         "model_dir": "folder1",
         "model_type": "lora",
+        "filename": "example.safetensors"
     }
     mock_civitdl.assert_called_once_with(546949, version_id=1, api_key=ANY)
 
@@ -116,20 +118,18 @@ def test_remove_model_success(mock_delete_model_file):
 
     response = client.delete("/models/546949/versions/1")
     assert response.status_code == 200
-    assert response.json() == [
-        {
+    assert response.json() == {
             "model_id": 546949,
             "version_id": 1,
             "model_dir": "/path/to/models/model-mid_546949-vid_1.ckpt",
             "filename": "model-mid_546949-vid_1.ckpt",
             "model_type": "lora",
-        }
-    ]
+    }
     mock_delete_model_file.assert_called_once_with(546949, 1)
 
 @patch('app.routers.delete_model_files')
 def test_remove_model_not_found(mock_delete_model_file):
-    mock_delete_model_file.return_value = False
+    mock_delete_model_file.return_value = []
 
     response = client.delete("/models/999999/versions/1")
     assert response.status_code == 404
