@@ -62,7 +62,7 @@ jobs:
           docker pull ${{ github.repository }}:${{ github.sha }}
           docker run -v $(pwd):/work --rm \
             ${{ github.repository }}:${{ github.sha }} \
-            python app/openapi.py /work/openapi.yml
+            python app/openapi.py /work/openapi.json --format json
 
       - name: Install openapi-generate-html
         run: |
