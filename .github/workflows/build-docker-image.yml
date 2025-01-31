@@ -85,7 +85,7 @@ jobs:
             --ui=swagger --theme=light --output pages/swagger.html
 
       - name: Upload artifact for Pages
-        uses: actions/upload-pages-artifact@v1
+        uses: actions/upload-pages-artifact@v2
         with:
           path: pages
 
