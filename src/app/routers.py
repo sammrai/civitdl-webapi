@@ -19,7 +19,7 @@ models_router = APIRouter(
 
 # --- Endpoints ---
 @models_router.get("/", response_model=List[ModelInfo])
-def list_models():
+def list_all_models():
     """
     Retrieve a list of all saved models.
     """
@@ -29,7 +29,7 @@ def list_models():
 @models_router.get("/{model_id}", response_model=List[ModelInfo])
 def get_model(model_id: int):
     """
-    Retrieve model information for the specified model_id.
+    Retrieve information for the specified model ID.
     """
     models = find_model_files(None, None)
     matched_models = [ModelInfo(**model.__dict__) for model in models if int(model.model_id) == model_id]
@@ -42,7 +42,7 @@ def get_model(model_id: int):
 @models_router.post("/{model_id}", response_model=DownloadResponse)
 def download_model(model_id: int):
     """
-    Download the model for the specified model_id.
+    Download the latest version of the specified model ID.
     """
     result = _civitdl(model_id, version_id=None, api_key=civitai_token)
     return DownloadResponse(**result)
@@ -50,44 +50,13 @@ def download_model(model_id: int):
 @models_router.delete("/{model_id}", response_model=List[ModelInfo])
 def remove_model(model_id: int):
     """
-    Delete the model file for the specified model_id and version_id.
+    Delete all versions of the specified model ID.
     """
     success = delete_model_files(model_id, None)
     if success:
         return [ModelInfo(**model.__dict__) for model in success]
     else:
         raise HTTPException(status_code=404, detail="Model file not found")
-
-@versions_router.get("/{version_id}", response_model=List[ModelInfo])
-def get_model_version(model_id: int, version_id: int):
-    """
-    Retrieve model information for the specified model_id and version_id.
-    """
-    models = find_model_files(None, None)
-    matched_models = [ModelInfo(**model.__dict__) for model in models if int(model.model_id) == model_id and int(model.version_id) == version_id]
-
-    if matched_models:
-        return matched_models
-    raise HTTPException(status_code=404, detail="Model version not found")
-
-@versions_router.post("/{version_id}", response_model=DownloadResponse)
-def download_model_version(model_id: int, version_id: int):
-    """
-    Download the model for the specified model_id and version_id.
-    """
-    result = _civitdl(model_id, version_id=version_id, api_key=civitai_token)
-    return DownloadResponse(**result)
-
-@versions_router.delete("/{version_id}", response_model=List[ModelInfo])
-def remove_model_version(model_id: int, version_id: int):
-    """
-    Delete the model file for the specified model_id and version_id.
-    """
-    success = delete_model_files(model_id, version_id)
-    if success:
-        return [ModelInfo(**model.__dict__) for model in success]
-    else:
-        raise HTTPException(status_code=404, detail="Model version file not found")
 
 @models_router.delete("/", response_model=List[ModelInfo])
 def remove_all_models():
@@ -99,3 +68,34 @@ def remove_all_models():
         return [ModelInfo(**model.__dict__) for model in success]
     else:
         raise HTTPException(status_code=404, detail="No model files found"+MODEL_ROOT_PATH)
+
+@versions_router.get("/{version_id}", response_model=List[ModelInfo])
+def get_model_version(model_id: int, version_id: int):
+    """
+    Retrieve information for the specified model ID and version ID.
+    """
+    models = find_model_files(None, None)
+    matched_models = [ModelInfo(**model.__dict__) for model in models if int(model.model_id) == model_id and int(model.version_id) == version_id]
+
+    if matched_models:
+        return matched_models
+    raise HTTPException(status_code=404, detail="Model version not found")
+
+@versions_router.post("/{version_id}", response_model=DownloadResponse)
+def download_model_version(model_id: int, version_id: int):
+    """
+    Download the specified version of the model.
+    """
+    result = _civitdl(model_id, version_id=version_id, api_key=civitai_token)
+    return DownloadResponse(**result)
+
+@versions_router.delete("/{version_id}", response_model=List[ModelInfo])
+def remove_model_version(model_id: int, version_id: int):
+    """
+    Delete the specified version of the model.
+    """
+    success = delete_model_files(model_id, version_id)
+    if success:
+        return [ModelInfo(**model.__dict__) for model in success]
+    else:
+        raise HTTPException(status_code=404, detail="Model version file not found")
