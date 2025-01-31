@@ -12,8 +12,8 @@ jobs:
     env:
       IMAGE_NAME: ${{ github.repository }}
     steps:
-      - name: checkout
-        uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v3  # 最新バージョンに更新
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
@@ -54,8 +54,8 @@ jobs:
     needs: docker-build
     runs-on: ubuntu-latest
     steps:
-      - name: checkout
-        uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v3
 
       - name: Run Docker container
         run: |
@@ -84,13 +84,11 @@ jobs:
           npx openapi-generate-html -i openapi.json \
             --ui=swagger --theme=light --output pages/swagger.html
 
+      # Pages用のアーティファクトをアップロード
       - name: Upload artifact for Pages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-pages-artifact@v2  # v2に変更
         with:
           path: pages
-          name: github-pages
-          if-no-files-found: ignore
-          retention-days: 1
 
   documentation-deployment:
     needs: generate-redoc
@@ -104,16 +102,6 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: "./artifacts"
-          name: github-pages-${{ github.run_id }}
-          if-no-files-found: ignore
-          retention-days: 1
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4  # 最新バージョンに更新
