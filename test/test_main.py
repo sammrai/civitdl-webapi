@@ -64,7 +64,7 @@ def test_get_model_success(mock_find_model_files):
         "filename": "model-mid_546949-vid_1.ckpt",
         "model_type": "lora",
     }]
-    mock_find_model_files.assert_called_once_with(model_id=None, version_id=None)
+    mock_find_model_files.assert_called_once_with(model_id=546949, version_id=None)
 
 @patch('app.routers.find_model_files')
 def test_get_model_not_found(mock_find_model_files):
@@ -73,7 +73,7 @@ def test_get_model_not_found(mock_find_model_files):
     response = client.get("/models/999999")
     assert response.status_code == 404
     assert response.json() == {"detail": "Model not found"}
-    mock_find_model_files.assert_called_once_with(model_id=None, version_id=None)
+    mock_find_model_files.assert_called_once_with(model_id=999999, version_id=None)
 
 @patch('app.routers._civitdl')
 def test_download_model_success(mock_civitdl):

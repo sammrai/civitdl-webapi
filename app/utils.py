@@ -31,16 +31,30 @@ MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
 config_manager = ConfigManager()
 config_manager._setFallback()
 
-def wrap_cli_args(cli_func: Callable[[], Dict[str, Any]],
-                  required_args: List[str],
-                  **override_kwargs) -> Dict[str, Any]:
-    """
-    Temporarily replace CLI arguments, execute cli_func, and return the resulting Dict with override_kwargs applied.
 
-    :param cli_func: Function for CLI that takes arguments
-    :param required_args: List of arguments to set in sys.argv
-    :param override_kwargs: Keyword arguments to override the execution result
-    :return: Dict after executing cli_func
+def wrap_cli_args(
+    cli_func: Callable[[], Dict[str, Any]],
+    required_args: List[str],
+    **override_kwargs
+) -> Dict[str, Any]:
+    """
+    Temporarily replace CLI arguments, execute `cli_func`, and return the resulting dictionary with `override_kwargs` applied.
+
+    **Description:**
+    This function allows you to simulate CLI arguments by temporarily modifying `sys.argv`, executing the provided CLI function, and then restoring the original `sys.argv`. Additionally, it overrides specific keyword arguments in the result.
+
+    **Parameters:**
+    - `cli_func` (`Callable[[], Dict[str, Any]]`): Function for CLI that takes arguments.
+    - `required_args` (`List[str]`): List of arguments to set in `sys.argv`.
+    - `override_kwargs` (`Dict[str, Any]`): Keyword arguments to override the execution result.
+
+    **Returns:**
+    - `Dict[str, Any]`: Dictionary after executing `cli_func` with overridden keyword arguments.
+
+    **Example:**
+    ```python
+    result = wrap_cli_args(cli_function, ['--model', '123'], verbose=True)
+    ```
     """
     original_argv = sys.argv
     try:
@@ -56,15 +70,30 @@ def wrap_cli_args(cli_func: Callable[[], Dict[str, Any]],
 
     return result_dict
 
+
 def get_safe_metadata(model_str: str) -> Dict[str, Any]:
     """
-    Retrieve metadata for the model specified by model_str and return it in a safe format with non-built-in types converted to strings.
+    Retrieve metadata for the model specified by `model_str` and return it in a safe format with non-built-in types converted to strings.
 
-    :param model_str: Model specification string in the format "civitai.com/models/xxx"
-    :return: Dict containing metadata
+    **Description:**
+    This function parses the model string to extract the model ID, retrieves metadata from the API, and ensures that all data types in the metadata are JSON serializable.
+
+    **Parameters:**
+    - `model_str` (`str`): Model specification string in the format `"civitai.com/models/xxx"`.
+
+    **Returns:**
+    - `Dict[str, Any]`: Dictionary containing the serialized metadata.
+
+    **Raises:**
+    - `AssertionError`: If the retrieved `model_id` does not match the parsed ID.
+
+    **Example:**
+    ```python
+    metadata = get_safe_metadata("civitai.com/models/12345")
+    ```
     """
     source_manager = SourceManager()
-    parsed_id = (source_manager.parse_src([model_str]))[0]
+    parsed_id = source_manager.parse_src([model_str])[0]
 
     metadata = Metadata(
         nsfw_mode="0",
@@ -81,15 +110,31 @@ def get_safe_metadata(model_str: str) -> Dict[str, Any]:
 
     return json.loads(json.dumps(metadata.__dict__, default=_serialize))
 
-def find_model_files(model_id: Optional[int] = None,
-                     version_id: Optional[int] = None) -> List[ModelInfo]:
-    """
-    Recursively search for files matching the specified model_id and version_id, and return a list of ModelInfo.
-    If both are None, search all models.
 
-    :param model_id: Model ID (None to target all models)
-    :param version_id: Version ID (None to target all versions)
-    :return: List of ModelInfo
+def find_model_files(
+    model_id: Optional[int] = None,
+    version_id: Optional[int] = None
+) -> List[ModelInfo]:
+    """
+    Recursively search for files matching the specified `model_id` and `version_id`, and return a list of `ModelInfo`.
+    If both are `None`, search all models.
+
+    **Description:**
+    This function traverses the `MODEL_ROOT_PATH` directory, matches files based on the naming pattern, and collects metadata about each model file found.
+
+    **Parameters:**
+    - `model_id` (`Optional[int]`): Model ID (`None` to target all models).
+    - `version_id` (`Optional[int]`): Version ID (`None` to target all versions).
+
+    **Returns:**
+    - `List[ModelInfo]`: List of `ModelInfo` objects matching the criteria.
+
+    **Example:**
+    ```python
+    all_models = find_model_files()
+    specific_model = find_model_files(model_id=12345)
+    specific_version = find_model_files(model_id=12345, version_id=1)
+    ```
     """
     model_pattern = re.compile(
         r".*-mid_(\d+)(?:-vid_(\d+))?.*\.(safetensors|ckpt|pt)$"
@@ -134,14 +179,28 @@ def find_model_files(model_id: Optional[int] = None,
 
     return found_models
 
-def delete_model_files(model_id: Optional[int] = None,
-                       version_id: Optional[int] = None) -> List[ModelInfo]:
-    """
-    Recursively delete model files and directories matching the specified model_id and version_id.
 
-    :param model_id: Model ID
-    :param version_id: Version ID
-    :return: List of ModelInfo that were targeted for deletion
+def delete_model_files(
+    model_id: Optional[int] = None,
+    version_id: Optional[int] = None
+) -> List[ModelInfo]:
+    """
+    Recursively delete model files and directories matching the specified `model_id` and `version_id`.
+
+    **Description:**
+    This function identifies model files based on the provided IDs and removes their corresponding directories from the filesystem.
+
+    **Parameters:**
+    - `model_id` (`Optional[int]`): Model ID.
+    - `version_id` (`Optional[int]`): Version ID.
+
+    **Returns:**
+    - `List[ModelInfo]`: List of `ModelInfo` objects that were targeted for deletion.
+
+    **Example:**
+    ```python
+    deleted_models = delete_model_files(model_id=12345, version_id=1)
+    ```
     """
     models_to_delete = find_model_files(model_id, version_id)
     if not models_to_delete:
@@ -152,18 +211,36 @@ def delete_model_files(model_id: Optional[int] = None,
 
     return models_to_delete
 
-def _civitdl(model_id: int,
-             version_id: Optional[int] = None,
-             api_key: Optional[str] = None) -> ModelInfo:
-    """
-    Download a model from Civitai by specifying model_id and version_id.
-    Returns HTTP 304 if a model with the same model_id and version_id already exists.
 
-    :param model_id: Model ID
-    :param version_id: Version ID
-    :param api_key: Civitai API Key (if not provided, environment variables will be used)
-    :return: Downloaded ModelInfo
-    :raises HTTPException: If the model already exists or download fails
+def _civitdl(
+    model_id: int,
+    version_id: Optional[int] = None,
+    api_key: Optional[str] = None
+) -> ModelInfo:
+    """
+    Download a model from Civitai by specifying `model_id` and `version_id`.
+    Returns HTTP 304 if a model with the same `model_id` and `version_id` already exists.
+
+    **Description:**
+    This function handles the downloading of a specific model version from Civitai. It first checks if the model version already exists to prevent duplicate downloads. If not, it retrieves the model metadata, prepares the download arguments, and initiates the batch download process.
+
+    **Parameters:**
+    - `model_id` (`int`): Model ID.
+    - `version_id` (`Optional[int]`): Version ID.
+    - `api_key` (`Optional[str]`): Civitai API Key (if not provided, environment variables will be used).
+
+    **Returns:**
+    - `ModelInfo`: Information about the downloaded model.
+
+    **Raises:**
+    - `HTTPException`:
+        - `304`: If the model is already downloaded.
+        - `404`: If the model is not found or if the download verification fails.
+
+    **Example:**
+    ```python
+    downloaded_model = _civitdl(model_id=12345, version_id=1, api_key="your_api_key")
+    ```
     """
     existing_files = find_model_files(model_id, None)
     if any(m.version_id == version_id for m in existing_files):
