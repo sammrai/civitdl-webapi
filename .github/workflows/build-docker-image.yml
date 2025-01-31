@@ -109,12 +109,11 @@ jobs:
       id-token: write
     steps:
       - name: Download pages artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: pages
           path: ./pages
 
-      # ここで実際にページをデプロイ
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v1
         id: deployment
