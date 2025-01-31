@@ -2,11 +2,9 @@ from civitconfig.data.configmanager import ConfigManager
 from civitdl.args.argparser import get_args
 from civitdl.batch._metadata import Metadata
 from civitdl.batch.batch_download import batch_download, BatchOptions
-from civitdl.batch._model import Model
 from fastapi import FastAPI, Query, HTTPException, APIRouter
 from helpers.sourcemanager import SourceManager
 from helpers.core.utils import APIException
-from pydantic import BaseModel
 from types import SimpleNamespace
 from typing import Callable, List, Dict, Any
 from typing import List, Optional
@@ -16,7 +14,7 @@ import re
 import requests
 import sys
 import shutil
-import enum
+from app.models import ModelType, ModelInfo, DownloadResponse
 
 
 # --- 環境変数 & ディレクトリマッピング ---
@@ -30,26 +28,6 @@ MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
     "textualinversion": os.path.join(MODEL_ROOT_PATH, "text_encoder"),
 }
 
-class ModelType(enum.Enum):
-    LORA = "lora"
-    LOCON = "locon"
-    VAE = "vae"
-    CHECKPOINT = "checkpoint"
-    TEXTUALINVERSION = "textualinversion"
-
-# --- Data Models ---
-class ModelInfo(BaseModel):
-    model_id: int
-    version_id: int
-    model_dir: str
-    filename: str
-    model_type: ModelType  # Enum に変更
-
-class DownloadResponse(BaseModel):
-    model_id: int
-    version_id: int
-    model_dir: str
-    model_type: ModelType  # Enum に変更
 
 c = ConfigManager()
 c._setFallback()

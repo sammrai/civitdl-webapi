@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from app.main import app
-from app.routers import ModelInfo
+from app.models import ModelInfo
 from unittest.mock import patch
 from unittest.mock import patch, ANY
 
