@@ -47,7 +47,7 @@ jobs:
       - name: Run tests
         run: |
           docker pull ${{ github.repository }}:${{ github.sha }}
-          docker run -e PYTHONPATH=/app -it -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} pytest
+          docker run -e PYTHONPATH=/app -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} pytest
 
   generate-redoc:
     needs: docker-build
