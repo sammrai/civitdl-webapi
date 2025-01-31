@@ -49,7 +49,7 @@ def test_list_models(mock_find_model_files):
 
         },
     ]
-    mock_find_model_files.assert_called_once_with(None, None)
+    mock_find_model_files.assert_called_once_with(model_id=None, version_id=None)
 
 @patch('app.routers.find_model_files')
 def test_get_model_success(mock_find_model_files):
@@ -64,7 +64,7 @@ def test_get_model_success(mock_find_model_files):
         "filename": "model-mid_546949-vid_1.ckpt",
         "model_type": "lora",
     }]
-    mock_find_model_files.assert_called_once_with(None, None)
+    mock_find_model_files.assert_called_once_with(model_id=None, version_id=None)
 
 @patch('app.routers.find_model_files')
 def test_get_model_not_found(mock_find_model_files):
@@ -73,7 +73,7 @@ def test_get_model_not_found(mock_find_model_files):
     response = client.get("/models/999999")
     assert response.status_code == 404
     assert response.json() == {"detail": "Model not found"}
-    mock_find_model_files.assert_called_once_with(None, None)
+    mock_find_model_files.assert_called_once_with(model_id=None, version_id=None)
 
 @patch('app.routers._civitdl')
 def test_download_model_success(mock_civitdl):
@@ -94,7 +94,7 @@ def test_download_model_success(mock_civitdl):
         "model_type": "lora",
         "filename": "example.safetensors"
     }
-    mock_civitdl.assert_called_once_with(546949, version_id=1, api_key=ANY)
+    mock_civitdl.assert_called_once_with(model_id=546949, version_id=1, api_key=ANY)
 
 @patch('app.routers._civitdl')
 def test_download_model_failure(mock_civitdl):
@@ -102,7 +102,7 @@ def test_download_model_failure(mock_civitdl):
 
     response = client.post("/models/546949/versions/1")
     assert response.status_code == 304
-    mock_civitdl.assert_called_once_with(546949, version_id=1, api_key=ANY)
+    mock_civitdl.assert_called_once_with(model_id=546949, version_id=1, api_key=ANY)
 
 @patch('app.routers.delete_model_files')
 def test_remove_model_success(mock_delete_model_file):
@@ -125,7 +125,7 @@ def test_remove_model_success(mock_delete_model_file):
             "filename": "model-mid_546949-vid_1.ckpt",
             "model_type": "lora",
     }
-    mock_delete_model_file.assert_called_once_with(546949, 1)
+    mock_delete_model_file.assert_called_once_with(model_id=546949, version_id=1)
 
 @patch('app.routers.delete_model_files')
 def test_remove_model_not_found(mock_delete_model_file):
@@ -133,8 +133,7 @@ def test_remove_model_not_found(mock_delete_model_file):
 
     response = client.delete("/models/999999/versions/1")
     assert response.status_code == 404
-    mock_delete_model_file.assert_called_once_with(999999, 1)
-
+    mock_delete_model_file.assert_called_once_with(model_id=999999, version_id=1)
 
 @patch('app.routers.delete_model_files')
 def test_remove_all_models_success(delete_model_files):
