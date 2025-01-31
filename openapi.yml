@@ -1,0 +1,298 @@
+openapi: 3.1.0
+info:
+  title: CivitDL API
+  description: API for downloading Civitai models
+  version: 1.0.0
+paths:
+  /models/:
+    get:
+      summary: List Models
+      description: Retrieve a list of all saved models.
+      operationId: list_models_models__get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ModelInfo'
+                type: array
+                title: Response List Models Models  Get
+    delete:
+      summary: Remove All Models
+      description: Delete all saved model files.
+      operationId: remove_all_models_models__delete
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ModelInfo'
+                type: array
+                title: Response Remove All Models Models  Delete
+  /models/{model_id}:
+    get:
+      summary: Get Model
+      description: Retrieve model information for the specified model_id.
+      operationId: get_model_models__model_id__get
+      parameters:
+      - name: model_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Model Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelInfo'
+                title: Response Get Model Models  Model Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      summary: Download Model
+      description: Download the model for the specified model_id.
+      operationId: download_model_models__model_id__post
+      parameters:
+      - name: model_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Model Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      summary: Remove Model
+      description: Delete the model file for the specified model_id and version_id.
+      operationId: remove_model_models__model_id__delete
+      parameters:
+      - name: model_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Model Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelInfo'
+                title: Response Remove Model Models  Model Id  Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /models/{model_id}/versions/{version_id}:
+    get:
+      summary: Get Model Version
+      description: Retrieve model information for the specified model_id and version_id.
+      operationId: get_model_version_models__model_id__versions__version_id__get
+      parameters:
+      - name: model_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Model Id
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Version Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelInfo'
+                title: Response Get Model Version Models  Model Id  Versions  Version
+                  Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      summary: Download Model Version
+      description: Download the model for the specified model_id and version_id.
+      operationId: download_model_version_models__model_id__versions__version_id__post
+      parameters:
+      - name: model_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Model Id
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Version Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      summary: Remove Model Version
+      description: Delete the model file for the specified model_id and version_id.
+      operationId: remove_model_version_models__model_id__versions__version_id__delete
+      parameters:
+      - name: model_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Model Id
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Version Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelInfo'
+                title: Response Remove Model Version Models  Model Id  Versions  Version
+                  Id  Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    DownloadResponse:
+      properties:
+        model_id:
+          type: integer
+          title: Model Id
+        version_id:
+          type: integer
+          title: Version Id
+        model_dir:
+          type: string
+          title: Model Dir
+        model_type:
+          $ref: '#/components/schemas/ModelType'
+      type: object
+      required:
+      - model_id
+      - version_id
+      - model_dir
+      - model_type
+      title: DownloadResponse
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ModelInfo:
+      properties:
+        model_id:
+          type: integer
+          title: Model Id
+        version_id:
+          type: integer
+          title: Version Id
+        model_dir:
+          type: string
+          title: Model Dir
+        filename:
+          type: string
+          title: Filename
+        model_type:
+          $ref: '#/components/schemas/ModelType'
+      type: object
+      required:
+      - model_id
+      - version_id
+      - model_dir
+      - filename
+      - model_type
+      title: ModelInfo
+    ModelType:
+      type: string
+      enum:
+      - lora
+      - locon
+      - vae
+      - checkpoint
+      - textualinversion
+      title: ModelType
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

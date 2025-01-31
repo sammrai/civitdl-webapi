@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  python-dev:
+    build: .
+    image: sammrai/civitdl-webapi:latest
+    volumes:
+      - ./data:/data
+    ports:
+      - "7681:7681"
+    environment:
+      - CIVITAI_TOKEN=your_civitai_token
+      - MODEL_ROOT_PATH=/data
+    tty: true
