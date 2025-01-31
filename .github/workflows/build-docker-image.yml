@@ -84,11 +84,9 @@ jobs:
           npx openapi-generate-html -i openapi.json \
             --ui=swagger --theme=light --output pages/swagger.html
 
-      # ここでHTMLファイルをアーティファクトとしてアップロード
-      - name: Upload HTML artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload artifact for Pages
+        uses: actions/upload-pages-artifact@v1
         with:
-          name: openapi-docs
           path: pages
 
   documentation-deployment:
