@@ -86,13 +86,9 @@ jobs:
 
       # ここでHTMLファイルをアーティファクトとしてアップロード
       - name: Upload HTML artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: openapi-docs
-          path: pages
-
-      - uses: actions/upload-pages-artifact@v1
-        with:
           path: pages
 
   documentation-deployment:
