@@ -288,6 +288,6 @@ def _civitdl(
         return downloaded[0]
 
     except APIException as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail="Model not found on Civitai.") from e
     except AssertionError as e:
         raise HTTPException(status_code=404, detail=str(e))

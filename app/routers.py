@@ -2,7 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
-from app.models import ModelInfo, DownloadResponse
+from app.models import ModelInfo
 from app.utils import (
     _civitdl,
     CIVITAI_TOKEN,
