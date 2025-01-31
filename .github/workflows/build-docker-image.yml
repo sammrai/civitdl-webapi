@@ -84,9 +84,8 @@ jobs:
           npx openapi-generate-html -i openapi.json \
             --ui=swagger --theme=light --output pages/swagger.html
 
-      # Pages用のアーティファクトをアップロード
       - name: Upload artifact for Pages
-        uses: actions/upload-pages-artifact@v2  # v2に変更
+        uses: actions/upload-pages-artifact@v3  # v2に変更
         with:
           path: pages
 
@@ -104,4 +103,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4  # 最新バージョンに更新
+        uses: actions/deploy-pages@v4
