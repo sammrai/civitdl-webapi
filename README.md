@@ -140,4 +140,3 @@ You can modify this if needed.
 ## Acknowledgments
 
 This project is powered by [CivitDL](https://github.com/OwenTruong/civitdl).  
-For more details on the original CLI tool and its configurations, refer to the [official documentation](https://github.com/OwenTruong/civitdl/blob/master/doc/civitconfig.md).
