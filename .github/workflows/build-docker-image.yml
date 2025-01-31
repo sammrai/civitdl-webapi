@@ -60,7 +60,7 @@ jobs:
       - name: Run Docker container
         run: |
           docker pull ${{ github.repository }}:${{ github.sha }}
-          docker run -v $(pwd):/work --rm \
+          docker run -e PYTHONPATH=/app -v $(pwd):/work --rm \
             ${{ github.repository }}:${{ github.sha }} \
             python app/openapi.py /work/openapi.json --format json
 
