@@ -2,7 +2,6 @@ version: '3.8'
 
 services:
   python-dev:
-    build: .
     image: sammrai/civitdl-webapi:latest
     volumes:
       - ./data:/data

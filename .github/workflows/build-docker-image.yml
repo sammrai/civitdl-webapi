@@ -24,7 +24,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push (main)
         if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v4
         with:
@@ -34,7 +34,7 @@ jobs:
             ${{ github.repository }}:${{ github.sha }}
             ${{ github.repository }}:latest
 
-      - name: Build and push for test branch
+      - name: Build and push (test)
         if: github.ref == 'refs/heads/test'
         uses: docker/build-push-action@v4
         with:
@@ -47,8 +47,8 @@ jobs:
       - name: Run tests
         run: |
           docker pull ${{ github.repository }}:${{ github.sha }}
-          docker run -e PYTHONPATH=/app -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} pytest
-
+          docker run -e PYTHONPATH=/app -v $(pwd):/work --rm \
+            ${{ github.repository }}:${{ github.sha }} pytest
 
   generate-redoc:
     needs: docker-build
@@ -60,7 +60,8 @@ jobs:
       - name: Run Docker container
         run: |
           docker pull ${{ github.repository }}:${{ github.sha }}
-          docker run -e -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} \
+          docker run -v $(pwd):/work --rm \
+            ${{ github.repository }}:${{ github.sha }} \
             python app/openapi.py /work/openapi.yml
 
       - name: Install openapi-generate-html
@@ -83,32 +84,37 @@ jobs:
           npx openapi-generate-html -i openapi.json \
             --ui=swagger --theme=light --output pages/swagger.html
 
-      - name: Upload Redoc and Swagger HTML as artifacts
+      # ここでHTMLファイルをアーティファクトとしてアップロード
+      - name: Upload HTML artifacts
         uses: actions/upload-artifact@v4
         with:
           name: openapi-docs
           path: pages
 
-      - uses: actions/upload-pages-artifact@v1
+      # GitHub Pages向けファイルも同じフォルダにある場合は、それもまとめてアップロード
+      - name: Upload pages artifact
+        uses: actions/upload-artifact@v4
         with:
+          name: pages
           path: pages
-
-      - name: Clean up Docker container
-        run: |
-          docker stop sd-forge-container
-          docker rm sd-forge-container
 
   documentation-deployment:
     needs: generate-redoc
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     if: ${{ github.ref == 'refs/heads/main' }}
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     permissions:
       pages: write
       id-token: write
     steps:
-      - uses: actions/deploy-pages@v1
+      - name: Download pages artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: pages
+          path: ./pages
+
+      # ここで実際にページをデプロイ
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v1
         id: deployment
