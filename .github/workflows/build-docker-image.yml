@@ -85,9 +85,10 @@ jobs:
             --ui=swagger --theme=light --output pages/swagger.html
 
       - name: Upload artifact for Pages
-        uses: actions/upload-pages-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           path: pages
+          name: github-pages
 
   documentation-deployment:
     needs: generate-redoc
@@ -101,5 +102,13 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - uses: actions/deploy-pages@v1
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "./artifacts"
+      - name: Deploy to GitHub Pages
         id: deployment
+        uses: actions/deploy-pages@v4
