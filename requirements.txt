@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-civitdl
-pyyaml
-
-# test
-httpx
-pytest
