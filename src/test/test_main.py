@@ -136,9 +136,9 @@ def test_remove_model_not_found(mock_delete_model_file):
     mock_delete_model_file.assert_called_once_with(999999, 1)
 
 
-@patch('app.routers.delete_all_models')
-def test_remove_all_models_success(mock_delete_all_model_files):
-    mock_delete_all_model_files.return_value = [
+@patch('app.routers.delete_model_files')
+def test_remove_all_models_success(delete_model_files):
+    delete_model_files.return_value = [
         ModelInfo(
             model_id=546949,
             version_id=1,
@@ -158,4 +158,4 @@ def test_remove_all_models_success(mock_delete_all_model_files):
             "model_type": "lora",
         }
     ]
-    mock_delete_all_model_files.assert_called_once()
+    delete_model_files.assert_called_once()
