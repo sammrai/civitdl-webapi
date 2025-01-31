@@ -49,6 +49,7 @@ jobs:
           docker pull ${{ github.repository }}:${{ github.sha }}
           docker run -e PYTHONPATH=/app -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} pytest
 
+
   generate-redoc:
     needs: docker-build
     runs-on: ubuntu-latest
@@ -59,24 +60,28 @@ jobs:
       - name: Run Docker container
         run: |
           docker pull ${{ github.repository }}:${{ github.sha }}
-          docker run -e -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} python app/openapi.py /work/openapi.yml
+          docker run -e -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} \
+            python app/openapi.py /work/openapi.yml
 
       - name: Install openapi-generate-html
         run: |
           npm install -g openapi-generate-html
-          mkdir pages
+          mkdir -p pages
 
       - name: Generate Stoplight Light HTML
         run: |
-          npx openapi-generate-html -i openapi.json --ui=stoplight --theme=light --output pages/stoplight.html
+          npx openapi-generate-html -i openapi.json \
+            --ui=stoplight --theme=light --output pages/stoplight.html
 
-      - name: Generate Stoplight Dark HTML
+      - name: Generate Redoc HTML
         run: |
-          npx openapi-generate-html -i openapi.json --ui=redoc --theme=light --output pages/redoc.html
+          npx openapi-generate-html -i openapi.json \
+            --ui=redoc --theme=light --output pages/redoc.html
 
       - name: Generate Swagger Light HTML
         run: |
-          npx openapi-generate-html -i openapi.json --ui=swagger --theme=light --output pages/swagger.html
+          npx openapi-generate-html -i openapi.json \
+            --ui=swagger --theme=light --output pages/swagger.html
 
       - name: Upload Redoc and Swagger HTML as artifacts
         uses: actions/upload-artifact@v4
