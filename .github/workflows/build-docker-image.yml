@@ -86,34 +86,26 @@ jobs:
 
       # ここでHTMLファイルをアーティファクトとしてアップロード
       - name: Upload HTML artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: openapi-docs
           path: pages
 
-      # GitHub Pages向けファイルも同じフォルダにある場合は、それもまとめてアップロード
-      - name: Upload pages artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-pages-artifact@v1
         with:
-          name: pages
           path: pages
 
   documentation-deployment:
     needs: generate-redoc
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: ${{ github.ref == 'refs/heads/main' }}
     environment:
       name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     permissions:
       pages: write
       id-token: write
     steps:
-      - name: Download pages artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: pages
-          path: ./pages
-
-      - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v1
+      - uses: actions/deploy-pages@v1
         id: deployment
