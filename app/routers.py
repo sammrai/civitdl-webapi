@@ -94,7 +94,6 @@ def remove_model_version(model_id: int, version_id: int):
     Delete the specified version of the model.
     """
     success = delete_model_files(model_id, version_id)
-    print("#a", success)
     if len(success) == 1:
         return success[0]
     elif len(success) ==0:

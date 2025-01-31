@@ -8,7 +8,6 @@ from civitdl.batch.batch_download import batch_download, BatchOptions
 from fastapi import HTTPException
 from helpers.core.utils import APIException
 from helpers.sourcemanager import SourceManager
-from types import SimpleNamespace
 from typing import Callable, List, Dict, Any
 from typing import List, Optional
 import json
@@ -45,7 +44,7 @@ def wrap_cli_args(cli_func: Callable[[], Dict[str, Any]], required_args: List[st
                 result_dict[key] = value
     finally:
         sys.argv = original_argv
-    return SimpleNamespace(**result_dict)
+    return result_dict
 
 
 def get_safe_metadata(_id: str):
@@ -135,11 +134,11 @@ def _civitdl(model_id, version_id=None, api_key=None):
                             verbose=False,
                             sorter=os.path.join(os.path.dirname(os.path.abspath(__file__)), "sorter.py")
                             )
-        source_strings, root_dir = args.__dict__.pop("source_strings", None), args.__dict__.pop("rootdir", None)
+        source_strings, root_dir = args.pop("source_strings", None), args.pop("rootdir", None)
         batch_download(
             source_strings=source_strings,
             rootdir=root_dir,
-            batchOptions=BatchOptions(**args.__dict__)
+            batchOptions=BatchOptions(**args)
         )
         ret = find_model_files(int(metadata["model_id"]), int(metadata["version_id"]))
         assert len(ret) == 1
