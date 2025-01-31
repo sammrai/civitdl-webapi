@@ -34,6 +34,11 @@ jobs:
             ${{ github.repository }}:${{ github.sha }}
             ${{ github.repository }}:latest
 
+      - name: Run tests
+        run: |
+          docker run -e PYTHONPATH=/app -v $(pwd):/work --rm \
+            ${{ github.repository }}:${{ github.sha }} pytest
+
       - name: Build and push (test)
         if: github.ref == 'refs/heads/test'
         uses: docker/build-push-action@v4
@@ -44,11 +49,6 @@ jobs:
             ${{ github.repository }}:${{ github.sha }}
             ${{ github.repository }}:test
 
-      - name: Run tests
-        run: |
-          docker pull ${{ github.repository }}:${{ github.sha }}
-          docker run -e PYTHONPATH=/app -v $(pwd):/work --rm \
-            ${{ github.repository }}:${{ github.sha }} pytest
 
   generate-redoc:
     needs: docker-build

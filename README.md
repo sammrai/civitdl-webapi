@@ -1,4 +1,3 @@
-
 # CivitDL Web API
 
 **CivitDL Web API** is a RESTful wrapper for the original [CivitDL CLI tool](https://github.com/OwenTruong/civitdl), designed to simplify the downloading and management of models from [Civitai](https://civitai.com/). By using this API, you can automate and efficiently handle model downloads, making it particularly useful for projects like [sd-forge-docker](https://github.com/sammrai/sd-forge-docker) that integrate with **Stable Diffusion WebUI**.
@@ -49,20 +48,45 @@ This structure ensures efficient model organization and easy management.
 
 ## API Endpoints
 
+For detailed OpenAPI specifications, please refer to the following links:
+- [Redoc](https://sammrai.github.io/civitdl-webapi/redoc.html)
+- [Swagger](https://sammrai.github.io/civitdl-webapi/swagger.html)
+- [Stoplight](https://sammrai.github.io/civitdl-webapi/stoplight.html)
+
 ### Download a model by ID
 Downloads a specific model from Civitai.  
 
 #### Request:
 ```sh
-curl -X POST "http://localhost:7681/models/28205"
+curl -s -X POST "http://localhost:7681/models/30410"
 ```
 
 #### Response:
 ```json
 {
-  "model_id": 28205,
-  "version_id": 47670,
-  "model_dir": "/data/models/Lora",
+  "model_id": 30410,
+  "version_id": 93602,
+  "model_dir": "/data/Lora/Pokemon - Selene-mid_30410-vid_93602",
+  "filename": "Selene-10-mid_30410-vid_93602.safetensors",
+  "model_type": "lora"
+}
+```
+
+### Download a model by model ID and version ID
+Downloads a specific model from Civitai.  
+
+#### Request:
+```sh
+curl -s -X POST "http://localhost:7681/models/30410/versions/36664"
+```
+
+#### Response:
+```json
+{
+  "model_id": 30410,
+  "version_id": 36664,
+  "model_dir": "/data/Lora/Pokemon - Selene-mid_30410-vid_36664",
+  "filename": "SeleneLora-10-mid_30410-vid_36664.safetensors",
   "model_type": "lora"
 }
 ```
@@ -80,10 +104,17 @@ curl -X GET "http://localhost:7681/models/"
 ```json
 [
   {
-    "model_id": 28205,
-    "version_id": 47670,
-    "model_dir": "/data/models/Lora",
-    "filename": "example.safetensors",
+    "model_id": 30410,
+    "version_id": 93602,
+    "model_dir": "/data/Lora/Pokemon - Selene-mid_30410-vid_93602",
+    "filename": "Selene-10-mid_30410-vid_93602.safetensors",
+    "model_type": "lora"
+  },
+  {
+    "model_id": 30410,
+    "version_id": 36664,
+    "model_dir": "/data/Lora/Pokemon - Selene-mid_30410-vid_36664",
+    "filename": "SeleneLora-10-mid_30410-vid_36664.safetensors",
     "model_type": "lora"
   }
 ]
