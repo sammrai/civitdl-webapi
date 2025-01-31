@@ -59,7 +59,7 @@ jobs:
       - name: Run Docker container
         run: |
           docker pull ${{ github.repository }}:${{ github.sha }}
-          docker run -e -it -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} python app/openapi.py /work/openapi.yml
+          docker run -e -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} python app/openapi.py /work/openapi.yml
 
       - name: Install openapi-generate-html
         run: |
@@ -106,4 +106,4 @@ jobs:
       id-token: write
     steps:
       - uses: actions/deploy-pages@v1
-        id: deployment
+        id: deployment        docker run -e -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} python app/openapi.py /work/openapi.yml        docker run -e -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} python app/openapi.py /work/openapi.yml        docker run -e -v $(pwd):/work --rm ${{ github.repository }}:${{ github.sha }} python app/openapi.py /work/openapi.yml
