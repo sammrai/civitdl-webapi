@@ -15,5 +15,5 @@ test/test
 .env
 log.txt
 testvenv
-./data
+data/**
 openapi.*

@@ -1,4 +1,5 @@
-from app.main import app, MODEL_TYPE_TO_FOLDER
+from app.main import app
+from app.routers import MODEL_TYPE_TO_FOLDER
 from fastapi import status
 from fastapi.testclient import TestClient
 import os

@@ -1,6 +1,7 @@
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from app.main import app, ModelInfo
+from app.main import app
+from app.routers import ModelInfo
 from unittest.mock import patch
 from unittest.mock import patch, ANY
 
@@ -25,7 +26,7 @@ mock_models = [
 ]
 
 
-@patch('app.main.find_model_files')
+@patch('app.routers.find_model_files')
 def test_list_models(mock_find_model_files):
     mock_find_model_files.return_value = mock_models
 
@@ -50,7 +51,7 @@ def test_list_models(mock_find_model_files):
     ]
     mock_find_model_files.assert_called_once_with(None, None)
 
-@patch('app.main.find_model_files')
+@patch('app.routers.find_model_files')
 def test_get_model_success(mock_find_model_files):
     mock_find_model_files.return_value = mock_models
 
@@ -65,7 +66,7 @@ def test_get_model_success(mock_find_model_files):
     }]
     mock_find_model_files.assert_called_once_with(None, None)
 
-@patch('app.main.find_model_files')
+@patch('app.routers.find_model_files')
 def test_get_model_not_found(mock_find_model_files):
     mock_find_model_files.return_value = mock_models
 
@@ -74,7 +75,7 @@ def test_get_model_not_found(mock_find_model_files):
     assert response.json() == {"detail": "Model not found"}
     mock_find_model_files.assert_called_once_with(None, None)
 
-@patch('app.main._civitdl')
+@patch('app.routers._civitdl')
 def test_download_model_success(mock_civitdl):
     mock_civitdl.return_value = {
         "model_id": 546949,
@@ -93,7 +94,7 @@ def test_download_model_success(mock_civitdl):
     }
     mock_civitdl.assert_called_once_with(546949, version_id=1, api_key=ANY)
 
-@patch('app.main._civitdl')
+@patch('app.routers._civitdl')
 def test_download_model_failure(mock_civitdl):
     mock_civitdl.side_effect = HTTPException(status_code=304, detail="Model already downloaded.")
 
@@ -101,7 +102,7 @@ def test_download_model_failure(mock_civitdl):
     assert response.status_code == 304
     mock_civitdl.assert_called_once_with(546949, version_id=1, api_key=ANY)
 
-@patch('app.main.delete_model_files')
+@patch('app.routers.delete_model_files')
 def test_remove_model_success(mock_delete_model_file):
     mock_delete_model_file.return_value = [
         ModelInfo(
@@ -126,7 +127,7 @@ def test_remove_model_success(mock_delete_model_file):
     ]
     mock_delete_model_file.assert_called_once_with(546949, 1)
 
-@patch('app.main.delete_model_files')
+@patch('app.routers.delete_model_files')
 def test_remove_model_not_found(mock_delete_model_file):
     mock_delete_model_file.return_value = False
 
@@ -135,7 +136,7 @@ def test_remove_model_not_found(mock_delete_model_file):
     mock_delete_model_file.assert_called_once_with(999999, 1)
 
 
-@patch('app.main.delete_all_models')
+@patch('app.routers.delete_all_models')
 def test_remove_all_models_success(mock_delete_all_model_files):
     mock_delete_all_model_files.return_value = [
         ModelInfo(
