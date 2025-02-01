@@ -238,9 +238,10 @@ def _civitdl(
     downloaded_model = _civitdl(model_id=12345, version_id=1, api_key="your_api_key")
     ```
     """
-    existing_files = find_model_files(model_id, None)
-    if any(m.version_id == version_id for m in existing_files):
-        raise HTTPException(status_code=304, detail="Model already downloaded.")
+    existing_model = find_model_files(model_id, version_id)
+    if existing_model:
+        assert len(existing_model) == 1
+        return existing_model[0]
 
     if version_id:
         model_id_str = f"civitai.com/models/{model_id}?modelVersionId={version_id}"

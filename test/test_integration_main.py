@@ -265,7 +265,7 @@ def test_delete_all_versions(client, model):
 @pytest.mark.parametrize("model", [{"model_id": 28205, "type": "lora", "version_id": 33811}])
 def test_download_same_version_twice(client, model):
     """
-    Test downloading the same model version twice and verifying the second attempt returns a 304 status code.
+    Test downloading the same model version twice and verifying the second attempt returns a 200 status code.
     """
     model_id = model["model_id"]
     version_id = model["version_id"]
@@ -276,7 +276,7 @@ def test_download_same_version_twice(client, model):
 
     # Second download attempt
     response = client.post(f"/models/{model_id}/versions/{version_id}")
-    assert response.status_code == status.HTTP_304_NOT_MODIFIED, "Expected 304 status code for already downloaded model"
+    assert response.status_code == status.HTTP_200_OK, "Expected 200 status code for already downloaded model"
 
 def test_get_nonexistent_model(client):
     """
