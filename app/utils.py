@@ -24,7 +24,7 @@ MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
     "locon": os.path.join(MODEL_ROOT_PATH, "model", "Lora"),
     "vae": os.path.join(MODEL_ROOT_PATH, "model", "VAE"),
     "checkpoint": os.path.join(MODEL_ROOT_PATH, "model", "Stable-diffusion"),
-    "textualinversion": os.path.join(MODEL_ROOT_PATH, "embeddings", "text_encoder"),
+    "textualinversion": os.path.join(MODEL_ROOT_PATH, "embeddings"),
 }
 
 
