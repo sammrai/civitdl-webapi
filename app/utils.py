@@ -12,7 +12,6 @@ from app.models import ModelInfo
 from helpers.core.utils import APIException
 from helpers.sourcemanager import SourceManager
 
-from civitconfig.data.configmanager import ConfigManager
 from civitdl.args.argparser import get_args
 from civitdl.batch._metadata import Metadata
 from civitdl.batch.batch_download import batch_download, BatchOptions
@@ -21,15 +20,12 @@ MODEL_ROOT_PATH = os.getenv("MODEL_ROOT_PATH", "/data")
 CIVITAI_TOKEN = os.getenv("CIVITAI_TOKEN", "")
 
 MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
-    "lora": os.path.join(MODEL_ROOT_PATH, "Lora"),
-    "locon": os.path.join(MODEL_ROOT_PATH, "Lora"),
-    "vae": os.path.join(MODEL_ROOT_PATH, "VAE"),
-    "checkpoint": os.path.join(MODEL_ROOT_PATH, "Stable-diffusion"),
-    "textualinversion": os.path.join(MODEL_ROOT_PATH, "text_encoder"),
+    "lora": os.path.join(MODEL_ROOT_PATH, "model", "Lora"),
+    "locon": os.path.join(MODEL_ROOT_PATH, "model", "Lora"),
+    "vae": os.path.join(MODEL_ROOT_PATH, "model", "VAE"),
+    "checkpoint": os.path.join(MODEL_ROOT_PATH, "model", "Stable-diffusion"),
+    "textualinversion": os.path.join(MODEL_ROOT_PATH, "embeddings", "text_encoder"),
 }
-
-config_manager = ConfigManager()
-config_manager._setFallback()
 
 
 def wrap_cli_args(
@@ -269,7 +265,7 @@ def _civitdl(
                 "sorter.py"
             )
         )
-
+        print(f"Downloading model {model_id_str} with args: { {k: '****' if k == 'api_key' else v for k, v in args.items()} }")
         source_strings = args.pop("source_strings", None)
         root_dir = args.pop("rootdir", None)
 
@@ -278,6 +274,7 @@ def _civitdl(
             rootdir=root_dir,
             batchOptions=BatchOptions(**args)
         )
+        print(f"Model {model_id_str} has been successfully downloaded to {output_dir}.")
 
         downloaded = find_model_files(
             int(metadata["model_id"]),
@@ -292,3 +289,5 @@ def _civitdl(
 
     except APIException as e:
         raise HTTPException(status_code=404, detail="Model not found on Civitai.") from e
+    except AssertionError as e:
+        raise HTTPException(status_code=404, detail=str(e))

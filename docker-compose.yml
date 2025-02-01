@@ -8,6 +8,6 @@ services:
     ports:
       - "7681:7681"
     environment:
-      - CIVITAI_TOKEN=your_civitai_token
-      - MODEL_ROOT_PATH=/data
+      CIVITAI_TOKEN: ${CIVITAI_TOKEN:-''}
+      MODEL_ROOT_PATH: /data
     tty: true

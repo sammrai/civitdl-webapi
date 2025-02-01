@@ -29,19 +29,19 @@ The API supports the following environment variables, which can be configured in
 | Variable          | Description                                        | Default Value |
 |------------------|------------------------------------------------|--------------|
 | `CIVITAI_TOKEN` | (Optional) Your Civitai API token for authentication. Required for downloading certain restricted models. | Not set |
-| `MODEL_ROOT_PATH` | Directory where models will be stored.         | `/data/models` |
+| `MODEL_ROOT_PATH` | Directory where models will be stored.         | `/data` |
 
 > **Note:** `CIVITAI_TOKEN` is not mandatory but is **highly recommended** for accessing models that require authentication. Without it, some models may not be downloadable.
 
 
 ## Model Directory Structure
 
-Downloaded models are organized into directories based on their type. If `MODEL_ROOT_PATH=/data/models`, the structure will be:
+Downloaded models are organized into directories based on their type. If `MODEL_ROOT_PATH=/data`, the structure will be:
 
 - **LoRA models:** `/data/models/Lora`  
 - **VAE models:** `/data/models/VAE`  
 - **Checkpoint models:** `/data/models/Stable-diffusion`  
-- **Textual Inversion models:** `/data/models/text_encoder`  
+- **Textual Inversion models:** `/data/embeddings`  
 
 This structure ensures efficient model organization and easy management.
 
@@ -58,7 +58,7 @@ Downloads a specific model from Civitai.
 
 #### Request:
 ```sh
-curl -s -X POST "http://localhost:7681/models/30410"
+curl -s -X POST "http://localhost:7681/models/439889"
 ```
 
 #### Response:
@@ -66,7 +66,7 @@ curl -s -X POST "http://localhost:7681/models/30410"
 {
   "model_id": 30410,
   "version_id": 93602,
-  "model_dir": "/data/Lora/Pokemon - Selene-mid_30410-vid_93602",
+  "model_dir": "/data/models/Lora/Pokemon - Selene-mid_30410-vid_93602",
   "filename": "Selene-10-mid_30410-vid_93602.safetensors",
   "model_type": "lora"
 }
@@ -85,7 +85,7 @@ curl -s -X POST "http://localhost:7681/models/30410/versions/36664"
 {
   "model_id": 30410,
   "version_id": 36664,
-  "model_dir": "/data/Lora/Pokemon - Selene-mid_30410-vid_36664",
+  "model_dir": "/data/models/Lora/Pokemon - Selene-mid_30410-vid_36664",
   "filename": "SeleneLora-10-mid_30410-vid_36664.safetensors",
   "model_type": "lora"
 }
@@ -106,14 +106,14 @@ curl -X GET "http://localhost:7681/models/"
   {
     "model_id": 30410,
     "version_id": 93602,
-    "model_dir": "/data/Lora/Pokemon - Selene-mid_30410-vid_93602",
+    "model_dir": "/data/models/Lora/Pokemon - Selene-mid_30410-vid_93602",
     "filename": "Selene-10-mid_30410-vid_93602.safetensors",
     "model_type": "lora"
   },
   {
     "model_id": 30410,
     "version_id": 36664,
-    "model_dir": "/data/Lora/Pokemon - Selene-mid_30410-vid_36664",
+    "model_dir": "/data/models/Lora/Pokemon - Selene-mid_30410-vid_36664",
     "filename": "SeleneLora-10-mid_30410-vid_36664.safetensors",
     "model_type": "lora"
   }
@@ -126,15 +126,6 @@ curl -X GET "http://localhost:7681/models/"
 The following volume is defined in `docker-compose.yml` to persist downloaded models:
 
 - `./data:/data` – Maps the local `data` directory to the container’s `/data` directory, ensuring models remain available even if the container is restarted.
-
-
-## Ports
-
-By default, the API is exposed on port `7681`. The mapping in `docker-compose.yml` is:
-
-- **Host:** `7681` → **Container:** `7681`
-
-You can modify this if needed.
 
 
 ## Acknowledgments
