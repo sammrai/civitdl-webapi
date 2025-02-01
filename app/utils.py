@@ -20,10 +20,10 @@ MODEL_ROOT_PATH = os.getenv("MODEL_ROOT_PATH", "/data")
 CIVITAI_TOKEN = os.getenv("CIVITAI_TOKEN", "")
 
 MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
-    "lora": os.path.join(MODEL_ROOT_PATH, "model", "Lora"),
-    "locon": os.path.join(MODEL_ROOT_PATH, "model", "Lora"),
-    "vae": os.path.join(MODEL_ROOT_PATH, "model", "VAE"),
-    "checkpoint": os.path.join(MODEL_ROOT_PATH, "model", "Stable-diffusion"),
+    "lora": os.path.join(MODEL_ROOT_PATH, "models", "Lora"),
+    "locon": os.path.join(MODEL_ROOT_PATH, "models", "Lora"),
+    "vae": os.path.join(MODEL_ROOT_PATH, "models", "VAE"),
+    "checkpoint": os.path.join(MODEL_ROOT_PATH, "models", "Stable-diffusion"),
     "textualinversion": os.path.join(MODEL_ROOT_PATH, "embeddings"),
 }
 
