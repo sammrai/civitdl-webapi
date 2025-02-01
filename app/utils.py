@@ -284,10 +284,11 @@ def _civitdl(
             int(metadata["version_id"])
         )
 
-        assert len(downloaded) == 1, "Downloaded model could not be verified."
+        if len(downloaded) == 0:
+            raise HTTPException(status_code=403, detail="Unable to download this model as it requires a valid API Key.")
+        if len(downloaded) > 1:
+            raise HTTPException(status_code=500, detail="Unexpected error occurred.")
         return downloaded[0]
 
     except APIException as e:
         raise HTTPException(status_code=404, detail="Model not found on Civitai.") from e
-    except AssertionError as e:
-        raise HTTPException(status_code=404, detail=str(e))
