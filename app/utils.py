@@ -215,7 +215,7 @@ def _civitdl(
 ) -> ModelInfo:
     """
     Download a model from Civitai by specifying `model_id` and `version_id`.
-    Returns HTTP 304 if a model with the same `model_id` and `version_id` already exists.
+    Returns HTTP 200 if a model with the same `model_id` and `version_id` already exists.
 
     **Description:**
     This function handles the downloading of a specific model version from Civitai. It first checks if the model version already exists to prevent duplicate downloads. If not, it retrieves the model metadata, prepares the download arguments, and initiates the batch download process.
@@ -230,7 +230,6 @@ def _civitdl(
 
     **Raises:**
     - `HTTPException`:
-        - `304`: If the model is already downloaded.
         - `404`: If the model is not found or if the download verification fails.
 
     **Example:**
@@ -238,10 +237,10 @@ def _civitdl(
     downloaded_model = _civitdl(model_id=12345, version_id=1, api_key="your_api_key")
     ```
     """
-    existing_model = find_model_files(model_id, version_id)
-    if existing_model:
-        assert len(existing_model) == 1
-        return existing_model[0]
+    existing_models = find_model_files(model_id, version_id)
+    if existing_models:
+        assert len(existing_models) == 1
+        return existing_models[0]
 
     if version_id:
         model_id_str = f"civitai.com/models/{model_id}?modelVersionId={version_id}"
@@ -283,7 +282,7 @@ def _civitdl(
         )
 
         if len(downloaded) == 0:
-            raise HTTPException(status_code=403, detail="Unable to download this model as it requires a valid API Key.")
+            raise HTTPException(status_code=401, detail="Unable to download this model as it requires a valid API Key.")
         if len(downloaded) > 1:
             raise HTTPException(status_code=500, detail="Unexpected error occurred.")
         return downloaded[0]
@@ -292,3 +291,5 @@ def _civitdl(
         raise HTTPException(status_code=404, detail="Model not found on Civitai.") from e
     except AssertionError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
