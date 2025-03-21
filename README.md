@@ -120,6 +120,19 @@ curl -X GET "http://localhost:7681/models/"
 ]
 ```
 
+## Develop
+
+### startup command
+
+```docker-compose.yml
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7681", "--workers", "4", "--log-level", "warning", "--reload"]
+```
+
+### test
+
+```
+docker-compose exec python-dev pytest test/
+```
 
 ## Persistent Storage
 

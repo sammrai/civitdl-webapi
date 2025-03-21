@@ -238,8 +238,7 @@ def _civitdl(
     ```
     """
     existing_models = find_model_files(model_id, version_id)
-    if existing_models:
-        assert len(existing_models) == 1
+    if len(existing_models) >= 1:
         return existing_models[0]
 
     if version_id:
