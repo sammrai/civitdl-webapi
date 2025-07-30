@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class ModelType(enum.Enum):
     LORA = "lora"
     LOCON = "locon"
+    DORA = "dora"
     VAE = "vae"
     CHECKPOINT = "checkpoint"
     TEXTUALINVERSION = "textualinversion"

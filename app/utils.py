@@ -22,6 +22,7 @@ CIVITAI_TOKEN = os.getenv("CIVITAI_TOKEN", "")
 MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
     "lora": os.path.join(MODEL_ROOT_PATH, "models", "Lora"),
     "locon": os.path.join(MODEL_ROOT_PATH, "models", "Lora"),
+    "dora": os.path.join(MODEL_ROOT_PATH, "models", "Lora"),
     "vae": os.path.join(MODEL_ROOT_PATH, "models", "VAE"),
     "checkpoint": os.path.join(MODEL_ROOT_PATH, "models", "Stable-diffusion"),
     "textualinversion": os.path.join(MODEL_ROOT_PATH, "embeddings"),
@@ -253,7 +254,7 @@ def _civitdl(
 
         args = wrap_cli_args(
             get_args,
-            [model_id_str, output_dir],
+            [model_id_str, output_dir or MODEL_ROOT_PATH],
             api_key=api_key,
             retry_count=1,
             pause_time=0.0,
@@ -270,7 +271,7 @@ def _civitdl(
 
         batch_download(
             source_strings=source_strings,
-            rootdir=root_dir,
+            rootdir=root_dir if root_dir != "None" else None,
             batchOptions=BatchOptions(**args)
         )
         print(f"Model {model_id_str} has been successfully downloaded to {output_dir}.")
