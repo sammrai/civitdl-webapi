@@ -81,7 +81,7 @@ def test_get_model_success(mock_find_model_files):
 
 @patch('app.routers.find_model_files')
 def test_get_model_not_found(mock_find_model_files):
-    mock_find_model_files.return_value = mock_models
+    mock_find_model_files.return_value = []  # Return empty list for not found
 
     response = client.get("/models/999999")
     assert response.status_code == 404

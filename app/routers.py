@@ -44,6 +44,8 @@ def list_model_versions(model_id: int):
     This endpoint fetches all versions of a specific model available in the system.
     """
     models = find_model_files(model_id=model_id, version_id=None)
+    if not models:
+        raise HTTPException(status_code=404, detail="Model not found")
     return [ModelInfo(**model.__dict__) for model in models]
 
 
