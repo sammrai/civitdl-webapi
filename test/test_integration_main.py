@@ -316,3 +316,35 @@ def test_download_nonexistent_version(client):
 
     response = client.post(f"/models/{model_id}/versions/{nonexistent_version_id}")
     assert response.status_code == status.HTTP_404_NOT_FOUND, "Expected 404 status code for nonexistent version"
+
+
+@pytest.mark.parametrize("model", MODEL_TEST_DATA[:2])  # Test with first 2 models
+def test_get_model_image(client, model):
+    """
+    Test getting an image for a downloaded model version.
+    """
+    model_id = model["model_id"]
+    version_id = model["version_id"]
+    
+    # First, download the model
+    endpoint = f"/models/{model_id}/versions/{version_id}" if version_id else f"/models/{model_id}"
+    response = client.post(endpoint)
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    actual_version_id = data["version_id"]
+    
+    # Then, try to get the image
+    response = client.get(f"/models/{model_id}/versions/{actual_version_id}/image")
+    assert response.status_code == status.HTTP_200_OK
+    assert response.headers["content-type"] in ["image/jpeg", "image/png"]
+    assert int(response.headers["content-length"]) > 0
+
+
+def test_get_model_image_not_found(client):
+    """
+    Test getting an image for a non-existent model.
+    """
+    response = client.get("/models/99999/versions/99999/image")
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.json()["detail"] == "Model version not found"
+

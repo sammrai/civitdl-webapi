@@ -1,6 +1,8 @@
 from typing import List
+import os
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from app.models import ModelInfo
 from app.utils import (
@@ -22,13 +24,12 @@ models_router = APIRouter(
     tags=["models"],
 )
 
-# --- Endpoints ---
 
+# --- Endpoints ---
 @models_router.get("/", response_model=List[ModelInfo])
 def list_all_models():
     """
     Retrieve a list of all saved models.
-
     This endpoint fetches all model files available in the system and returns their information.
     """
     models = find_model_files(model_id=None, version_id=None)
@@ -36,26 +37,20 @@ def list_all_models():
 
 
 @models_router.get("/{model_id}", response_model=List[ModelInfo])
-def get_model(model_id: int):
+def list_model_versions(model_id: int):
     """
-    Retrieve information for the specified model ID.
+    Retrieve a list of all saved versions for the specified model ID.
 
-    This endpoint fetches all versions of a model by its ID.
+    This endpoint fetches all versions of a specific model available in the system.
     """
     models = find_model_files(model_id=model_id, version_id=None)
-    matched_models = [
-        ModelInfo(**model.__dict__) for model in models if int(model.model_id) == model_id
-    ]
-
-    if matched_models:
-        return matched_models
-    raise HTTPException(status_code=404, detail="Model not found")
+    return [ModelInfo(**model.__dict__) for model in models]
 
 
 @models_router.post("/{model_id}", response_model=ModelInfo)
 def download_model(model_id: int):
     """
-    Download the latest version of the specified model ID.
+    Download the latest version of the specified model.
 
     This endpoint initiates the download process for the latest version of the given model.
     """
@@ -131,3 +126,36 @@ def remove_model_version(model_id: int, version_id: int):
         raise HTTPException(status_code=404, detail="Model version file not found")
     else:
         raise HTTPException(status_code=500, detail="Multiple model version files found")
+
+
+@versions_router.get("/{version_id}/image")
+def get_model_version_image(model_id: int, version_id: int):
+    """
+    Get the first image for the specified model version.
+    
+    This endpoint returns the first image found in the model's extra_data directory.
+    """
+    models = find_model_files(model_id=model_id, version_id=version_id)
+    if not models:
+        raise HTTPException(status_code=404, detail="Model version not found")
+    
+    model = models[0]
+    # Look for images in the extra_data directory
+    extra_data_dir = os.path.join(model.model_dir, f"extra_data-vid_{version_id}")
+    
+    if not os.path.exists(extra_data_dir):
+        raise HTTPException(status_code=404, detail="No images directory found")
+    
+    # Find image files using os.listdir to handle special characters
+    image_files = [
+        os.path.join(extra_data_dir, file)
+        for file in os.listdir(extra_data_dir)
+        if file.lower().endswith(('.jpg', '.jpeg', '.png'))
+    ]
+    
+    if not image_files:
+        raise HTTPException(status_code=404, detail="No images found")
+    
+    # Return the first image
+    image_path = sorted(image_files)[0]  # Sort to ensure consistent ordering
+    return FileResponse(image_path)

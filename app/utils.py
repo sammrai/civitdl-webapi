@@ -159,10 +159,21 @@ def find_model_files(
                 )
 
                 model_type = "unknown"
+                name = ""
+                description = ""
+                created_at = ""
                 if os.path.exists(extra_data_path):
                     with open(extra_data_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         model_type = data.get("type", "").lower()
+                        name = data.get("name", "")
+                        description = data.get("description", "")
+                        # Find the version in modelVersions array
+                        model_versions = data.get("modelVersions", [])
+                        for version in model_versions:
+                            if version.get("id") == found_version_id:
+                                created_at = version.get("createdAt", "")
+                                break
 
                 found_models.append(
                     ModelInfo(
@@ -170,7 +181,10 @@ def find_model_files(
                         version_id=found_version_id,
                         model_dir=root,
                         filename=file,
-                        model_type=model_type
+                        model_type=model_type,
+                        name=name,
+                        description=description,
+                        created_at=created_at
                     )
                 )
 
