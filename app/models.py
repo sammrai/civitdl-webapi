@@ -1,4 +1,5 @@
 import enum
+from typing import Optional
 from civitdl.batch._model import Model
 from pydantic import BaseModel
 
@@ -18,9 +19,9 @@ class ModelInfo(BaseModel):
     model_dir: str
     filename: str
     model_type: ModelType  # Enum に変更
-    name: str
-    description: str
-    created_at: str
+    name: Optional[str]
+    description: Optional[str]
+    created_at: Optional[str]
 
 class DownloadResponse(BaseModel):
     model_id: int

@@ -239,3 +239,47 @@ def test_get_model_version_image_no_images(mock_listdir, mock_exists, mock_find_
     response = client.get("/models/546949/versions/1/image")
     assert response.status_code == 404
     assert response.json() == {"detail": "No images found"}
+
+
+@patch('app.routers.find_model_files')
+def test_model_with_none_description(mock_find_model_files):
+    # Test that models with None description are handled correctly
+    model_with_none_desc = ModelInfo(
+        model_id=789456,
+        version_id=1,
+        model_dir="/path/to/model",
+        filename="model.safetensors",
+        model_type="lora",
+        name="Test Model",
+        description=None,  # None description
+        created_at="2023-01-01T00:00:00.000Z"
+    )
+    mock_find_model_files.return_value = [model_with_none_desc]
+    
+    response = client.get("/models/789456")
+    assert response.status_code == 200
+    data = response.json()[0]
+    assert data["description"] is None
+
+
+@patch('app.routers.find_model_files')
+def test_model_with_all_none_optional_fields(mock_find_model_files):
+    # Test that models with all optional fields as None are handled correctly
+    model_with_all_none = ModelInfo(
+        model_id=123789,
+        version_id=2,
+        model_dir="/path/to/model",
+        filename="model.ckpt",
+        model_type="checkpoint",
+        name=None,  # None name
+        description=None,  # None description
+        created_at=None  # None created_at
+    )
+    mock_find_model_files.return_value = [model_with_all_none]
+    
+    response = client.get("/models/123789")
+    assert response.status_code == 200
+    data = response.json()[0]
+    assert data["name"] is None
+    assert data["description"] is None
+    assert data["created_at"] is None
