@@ -11,6 +11,7 @@ from app.utils import (
     _civitdl_async_worker,
     create_task,
     get_task,
+    check_disk_space,
     CIVITAI_TOKEN,
     delete_model_files,
     find_model_files,
@@ -65,6 +66,7 @@ def download_model(model_id: int):
 
     This endpoint initiates the download process for the latest version of the given model.
     """
+    check_disk_space(model_id=model_id, version_id=None)
     return _civitdl(model_id=model_id, version_id=None, api_key=CIVITAI_TOKEN)
 
 
@@ -120,6 +122,7 @@ def download_model_version(model_id: int, version_id: int):
 
     This endpoint initiates the download process for a specific version of a model.
     """
+    check_disk_space(model_id=model_id, version_id=version_id)
     return _civitdl(model_id=model_id, version_id=version_id, api_key=CIVITAI_TOKEN)
 
 
@@ -180,6 +183,7 @@ def download_model_async(model_id: int, background_tasks: BackgroundTasks):
 
     This endpoint initiates a background download and returns a task ID for status tracking.
     """
+    check_disk_space(model_id=model_id, version_id=None)
     task_id = create_task(model_id=model_id, version_id=None)
 
     # Start background download using threading to avoid blocking
@@ -203,6 +207,7 @@ def download_model_version_async(model_id: int, version_id: int, background_task
 
     This endpoint initiates a background download and returns a task ID for status tracking.
     """
+    check_disk_space(model_id=model_id, version_id=version_id)
     task_id = create_task(model_id=model_id, version_id=version_id)
 
     # Start background download using threading to avoid blocking

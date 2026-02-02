@@ -82,6 +82,65 @@ def _get_tmp_file_size(base_dir: str) -> int:
     return total_size
 
 
+def get_available_disk_space(path: str) -> int:
+    """Get available disk space in bytes for the given path."""
+    stat = os.statvfs(path)
+    return stat.f_bavail * stat.f_frsize
+
+
+def get_model_file_size(model_id: int, version_id: Optional[int] = None) -> int:
+    """Get expected file size in bytes from Civitai API metadata."""
+    if version_id:
+        model_id_str = f"civitai.com/models/{model_id}?modelVersionId={version_id}"
+    else:
+        model_id_str = str(model_id)
+
+    metadata = get_safe_metadata(model_id_str)
+    model_dict = metadata.get("model_dict", {})
+    model_versions = model_dict.get("modelVersions", [])
+
+    if not model_versions:
+        return 0
+
+    files = model_versions[0].get("files", [])
+    for file in files:
+        if file.get("primary", False):
+            return int(file.get("sizeKB", 0) * 1024)
+
+    if files:
+        return int(files[0].get("sizeKB", 0) * 1024)
+
+    return 0
+
+
+def check_disk_space(model_id: int, version_id: Optional[int] = None) -> None:
+    """
+    Check if there is enough disk space to download the model.
+    Raises HTTPException with 507 status code if insufficient space.
+    """
+    try:
+        file_size = get_model_file_size(model_id, version_id)
+        if file_size == 0:
+            return  # Cannot determine size, proceed with download
+
+        available_space = get_available_disk_space(MODEL_ROOT_PATH)
+
+        # Add 10% margin for safety
+        required_space = int(file_size * 1.1)
+
+        if available_space < required_space:
+            available_mb = available_space / (1024 * 1024)
+            required_mb = required_space / (1024 * 1024)
+            raise HTTPException(
+                status_code=507,
+                detail=f"Insufficient storage. Required: {required_mb:.1f}MB, Available: {available_mb:.1f}MB"
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # If check fails, proceed with download
+
+
 def wrap_cli_args(
     cli_func: Callable[[], Dict[str, Any]],
     required_args: List[str],
