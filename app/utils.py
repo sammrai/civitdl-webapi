@@ -4,6 +4,8 @@ import re
 import sys
 import shutil
 import requests
+import uuid
+import threading
 
 from typing import Callable, List, Dict, Any, Optional
 from fastapi import HTTPException
@@ -27,6 +29,57 @@ MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
     "checkpoint": os.path.join(MODEL_ROOT_PATH, "models", "Stable-diffusion"),
     "textualinversion": os.path.join(MODEL_ROOT_PATH, "embeddings"),
 }
+
+# Task management for async downloads
+_download_tasks: Dict[str, Dict[str, Any]] = {}
+_tasks_lock = threading.Lock()
+
+
+def create_task_id() -> str:
+    """Generate a unique task ID."""
+    return str(uuid.uuid4())
+
+
+def create_task(model_id: int, version_id: Optional[int] = None) -> str:
+    """Create a new download task and return its ID."""
+    task_id = create_task_id()
+    with _tasks_lock:
+        _download_tasks[task_id] = {
+            "task_id": task_id,
+            "status": "pending",
+            "progress": 0,
+            "model_id": model_id,
+            "version_id": version_id,
+            "result": None,
+            "error": None
+        }
+    return task_id
+
+
+def get_task(task_id: str) -> Optional[Dict[str, Any]]:
+    """Get task status by task ID."""
+    with _tasks_lock:
+        return _download_tasks.get(task_id)
+
+
+def update_task(task_id: str, **kwargs) -> None:
+    """Update task status."""
+    with _tasks_lock:
+        if task_id in _download_tasks:
+            _download_tasks[task_id].update(kwargs)
+
+
+def _get_tmp_file_size(base_dir: str) -> int:
+    """Get total size of files in .tmp directories under base_dir."""
+    total_size = 0
+    for root, dirs, files in os.walk(base_dir):
+        if ".tmp" in root:
+            for file in files:
+                try:
+                    total_size += os.path.getsize(os.path.join(root, file))
+                except OSError:
+                    pass
+    return total_size
 
 
 def wrap_cli_args(
@@ -307,3 +360,161 @@ def _civitdl(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _civitdl_async_worker(
+    task_id: str,
+    model_id: int,
+    version_id: Optional[int] = None,
+    api_key: Optional[str] = None
+) -> None:
+    """
+    Worker function to download a model asynchronously and update task status.
+    This function runs in a background thread with real-time progress tracking
+    by monitoring file size in .tmp directories.
+    """
+    download_complete = threading.Event()
+    download_error = [None]  # Use list to allow modification in nested function
+
+    def do_download():
+        """Execute batch_download in a separate thread."""
+        try:
+            if version_id:
+                model_id_str = f"civitai.com/models/{model_id}?modelVersionId={version_id}"
+            else:
+                model_id_str = str(model_id)
+
+            metadata = get_safe_metadata(model_id_str)
+            model_type = metadata.get("model_dict", {}).get("type", "").lower()
+            output_dir = MODEL_TYPE_TO_FOLDER.get(model_type)
+
+            args = wrap_cli_args(
+                get_args,
+                [model_id_str, output_dir or MODEL_ROOT_PATH],
+                api_key=api_key,
+                retry_count=1,
+                pause_time=0.0,
+                with_color=False,
+                verbose=False,
+                sorter=os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "sorter.py"
+                )
+            )
+            source_strings = args.pop("source_strings", None)
+            root_dir = args.pop("rootdir", None)
+
+            batch_download(
+                source_strings=source_strings,
+                rootdir=root_dir if root_dir != "None" else None,
+                batchOptions=BatchOptions(**args)
+            )
+        except Exception as e:
+            download_error[0] = e
+        finally:
+            download_complete.set()
+
+    try:
+        # Check if model already exists
+        update_task(task_id, status="downloading", progress=1)
+        existing_models = find_model_files(model_id, version_id)
+        if len(existing_models) >= 1:
+            update_task(
+                task_id,
+                status="finished",
+                progress=100,
+                result=existing_models[0]
+            )
+            return
+
+        # Get metadata for file size estimation
+        if version_id:
+            model_id_str = f"civitai.com/models/{model_id}?modelVersionId={version_id}"
+        else:
+            model_id_str = str(model_id)
+
+        metadata = get_safe_metadata(model_id_str)
+        model_dict = metadata.get("model_dict", {})
+        model_type = model_dict.get("type", "").lower()
+        output_dir = MODEL_TYPE_TO_FOLDER.get(model_type, MODEL_ROOT_PATH)
+
+        # Get expected file size from metadata
+        expected_size = 0
+        model_versions = model_dict.get("modelVersions", [])
+        if model_versions:
+            files = model_versions[0].get("files", [])
+            for file in files:
+                if file.get("primary", False):
+                    expected_size = int(file.get("sizeKB", 0) * 1024)
+                    break
+            if expected_size == 0 and files:
+                expected_size = int(files[0].get("sizeKB", 0) * 1024)
+
+        update_task(task_id, progress=5)
+
+        # Start download in separate thread
+        download_thread = threading.Thread(target=do_download)
+        download_thread.start()
+
+        # Monitor progress by checking .tmp file sizes
+        while not download_complete.is_set():
+            if expected_size > 0:
+                current_size = _get_tmp_file_size(output_dir)
+                progress = min(5 + int((current_size / expected_size) * 90), 95)
+                update_task(task_id, progress=progress)
+            download_complete.wait(timeout=0.5)
+
+        # Wait for download thread to finish
+        download_thread.join()
+
+        # Check for errors
+        if download_error[0]:
+            raise download_error[0]
+
+        update_task(task_id, progress=98)
+
+        # Verify download
+        downloaded = find_model_files(
+            int(metadata["model_id"]),
+            int(metadata["version_id"])
+        )
+
+        if len(downloaded) == 0:
+            update_task(
+                task_id,
+                status="failed",
+                progress=0,
+                error="Unable to download this model as it requires a valid API Key."
+            )
+            return
+
+        # Success
+        update_task(
+            task_id,
+            status="finished",
+            progress=100,
+            result=downloaded[0]
+        )
+
+    except APIException as e:
+        update_task(
+            task_id,
+            status="failed",
+            progress=0,
+            error="Model not found on Civitai."
+        )
+    except AssertionError as e:
+        update_task(
+            task_id,
+            status="failed",
+            progress=0,
+            error=str(e)
+        )
+    except Exception as e:
+        print(f"Download failed for model {model_id}: {e}")
+        update_task(
+            task_id,
+            status="failed",
+            progress=0,
+            error=str(e)
+        )
