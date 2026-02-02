@@ -28,3 +28,16 @@ class DownloadResponse(BaseModel):
     version_id: int
     model_dir: str
     model_type: ModelType  # Enum に変更
+
+class AsyncDownloadResponse(BaseModel):
+    task_id: str
+    status_url: str
+
+class TaskStatus(BaseModel):
+    task_id: str
+    status: str  # pending, downloading, finished, failed
+    progress: int  # 0-100
+    model_id: int
+    version_id: Optional[int]
+    result: Optional[ModelInfo]
+    error: Optional[str]

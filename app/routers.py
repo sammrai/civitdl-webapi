@@ -1,12 +1,17 @@
 from typing import List
 import os
+import threading
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 
-from app.models import ModelInfo
+from app.models import ModelInfo, AsyncDownloadResponse, TaskStatus
 from app.utils import (
     _civitdl,
+    _civitdl_async_worker,
+    create_task,
+    get_task,
+    check_disk_space,
     CIVITAI_TOKEN,
     delete_model_files,
     find_model_files,
@@ -22,6 +27,11 @@ versions_router = APIRouter(
 models_router = APIRouter(
     prefix="/models",
     tags=["models"],
+)
+
+status_router = APIRouter(
+    prefix="/status",
+    tags=["status"],
 )
 
 
@@ -56,6 +66,7 @@ def download_model(model_id: int):
 
     This endpoint initiates the download process for the latest version of the given model.
     """
+    check_disk_space(model_id=model_id, version_id=None)
     return _civitdl(model_id=model_id, version_id=None, api_key=CIVITAI_TOKEN)
 
 
@@ -111,6 +122,7 @@ def download_model_version(model_id: int, version_id: int):
 
     This endpoint initiates the download process for a specific version of a model.
     """
+    check_disk_space(model_id=model_id, version_id=version_id)
     return _civitdl(model_id=model_id, version_id=version_id, api_key=CIVITAI_TOKEN)
 
 
@@ -134,30 +146,94 @@ def remove_model_version(model_id: int, version_id: int):
 def get_model_version_image(model_id: int, version_id: int):
     """
     Get the first image for the specified model version.
-    
+
     This endpoint returns the first image found in the model's extra_data directory.
     """
     models = find_model_files(model_id=model_id, version_id=version_id)
     if not models:
         raise HTTPException(status_code=404, detail="Model version not found")
-    
+
     model = models[0]
     # Look for images in the extra_data directory
     extra_data_dir = os.path.join(model.model_dir, f"extra_data-vid_{version_id}")
-    
+
     if not os.path.exists(extra_data_dir):
         raise HTTPException(status_code=404, detail="No images directory found")
-    
+
     # Find image files using os.listdir to handle special characters
     image_files = [
         os.path.join(extra_data_dir, file)
         for file in os.listdir(extra_data_dir)
         if file.lower().endswith(('.jpg', '.jpeg', '.png'))
     ]
-    
+
     if not image_files:
         raise HTTPException(status_code=404, detail="No images found")
-    
+
     # Return the first image
     image_path = sorted(image_files)[0]  # Sort to ensure consistent ordering
     return FileResponse(image_path)
+
+
+# --- Async Download Endpoints ---
+@models_router.post("/{model_id}/async", response_model=AsyncDownloadResponse)
+def download_model_async(model_id: int, background_tasks: BackgroundTasks):
+    """
+    Start an asynchronous download of the latest version of the specified model.
+
+    This endpoint initiates a background download and returns a task ID for status tracking.
+    """
+    check_disk_space(model_id=model_id, version_id=None)
+    task_id = create_task(model_id=model_id, version_id=None)
+
+    # Start background download using threading to avoid blocking
+    thread = threading.Thread(
+        target=_civitdl_async_worker,
+        args=(task_id, model_id, None, CIVITAI_TOKEN)
+    )
+    thread.daemon = True
+    thread.start()
+
+    return AsyncDownloadResponse(
+        task_id=task_id,
+        status_url=f"/status/{task_id}"
+    )
+
+
+@versions_router.post("/{version_id}/async", response_model=AsyncDownloadResponse)
+def download_model_version_async(model_id: int, version_id: int, background_tasks: BackgroundTasks):
+    """
+    Start an asynchronous download of the specified version of the model.
+
+    This endpoint initiates a background download and returns a task ID for status tracking.
+    """
+    check_disk_space(model_id=model_id, version_id=version_id)
+    task_id = create_task(model_id=model_id, version_id=version_id)
+
+    # Start background download using threading to avoid blocking
+    thread = threading.Thread(
+        target=_civitdl_async_worker,
+        args=(task_id, model_id, version_id, CIVITAI_TOKEN)
+    )
+    thread.daemon = True
+    thread.start()
+
+    return AsyncDownloadResponse(
+        task_id=task_id,
+        status_url=f"/status/{task_id}"
+    )
+
+
+@status_router.get("/{task_id}", response_model=TaskStatus)
+def get_download_status(task_id: str):
+    """
+    Get the status and progress of an asynchronous download task.
+
+    Returns the current status (pending, downloading, finished, failed),
+    progress percentage (0-100), and result or error information.
+    """
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    return TaskStatus(**task)
