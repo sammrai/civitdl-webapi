@@ -119,6 +119,10 @@ def check_disk_space(model_id: int, version_id: Optional[int] = None) -> None:
     Raises HTTPException with 507 status code if insufficient space.
     """
     try:
+        # Already downloaded models don't require additional space, skip the check
+        if find_model_files(model_id, version_id):
+            return
+
         file_size = get_model_file_size(model_id, version_id)
         if file_size == 0:
             return  # Cannot determine size, proceed with download
