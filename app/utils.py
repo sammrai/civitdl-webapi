@@ -30,6 +30,29 @@ MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
     "textualinversion": os.path.join(MODEL_ROOT_PATH, "embeddings"),
 }
 
+DOWNLOAD_REFUSED = "Unable to download this model as it requires a valid API Key."
+
+
+class _CivitaiSession(requests.Session):
+    """
+    Session that remembers why Civitai refused a download.
+
+    civitdl reports every refusal as a missing API key, discarding the reason
+    Civitai gave, so keep it from the response civitdl already made.
+    """
+
+    refusal = None
+
+    def get(self, url, **kwargs):
+        response = super().get(url, **kwargs)
+        if "/api/download/models/" in str(url) and response.status_code in (401, 403):
+            try:
+                self.refusal = response.json().get("message")
+            except ValueError:
+                pass
+        return response
+
+
 # Task management for async downloads
 _download_tasks: Dict[str, Dict[str, Any]] = {}
 _tasks_lock = threading.Lock()
@@ -50,6 +73,8 @@ def create_task(model_id: int, version_id: Optional[int] = None) -> str:
             "progress": 0,
             "model_id": model_id,
             "version_id": version_id,
+            "model_name": None,
+            "model_type": None,
             "result": None,
             "error": None
         }
@@ -399,10 +424,13 @@ def _civitdl(
         source_strings = args.pop("source_strings", None)
         root_dir = args.pop("rootdir", None)
 
+        batch_options = BatchOptions(**args)
+        batch_options.session = _CivitaiSession()
+
         batch_download(
             source_strings=source_strings,
             rootdir=root_dir if root_dir != "None" else None,
-            batchOptions=BatchOptions(**args)
+            batchOptions=batch_options
         )
         print(f"Model {model_id_str} has been successfully downloaded to {output_dir}.")
 
@@ -412,7 +440,10 @@ def _civitdl(
         )
 
         if len(downloaded) == 0:
-            raise HTTPException(status_code=401, detail="Unable to download this model as it requires a valid API Key.")
+            raise HTTPException(
+                status_code=401,
+                detail=batch_options.session.refusal or DOWNLOAD_REFUSED
+            )
         if len(downloaded) > 1:
             raise HTTPException(status_code=500, detail="Unexpected error occurred.")
         return downloaded[0]
@@ -421,6 +452,8 @@ def _civitdl(
         raise HTTPException(status_code=404, detail="Model not found on Civitai.") from e
     except AssertionError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -438,6 +471,7 @@ def _civitdl_async_worker(
     """
     download_complete = threading.Event()
     download_error = [None]  # Use list to allow modification in nested function
+    session = _CivitaiSession()
 
     def do_download():
         """Execute batch_download in a separate thread."""
@@ -467,10 +501,13 @@ def _civitdl_async_worker(
             source_strings = args.pop("source_strings", None)
             root_dir = args.pop("rootdir", None)
 
+            batch_options = BatchOptions(**args)
+            batch_options.session = session
+
             batch_download(
                 source_strings=source_strings,
                 rootdir=root_dir if root_dir != "None" else None,
-                batchOptions=BatchOptions(**args)
+                batchOptions=batch_options
             )
         except Exception as e:
             download_error[0] = e
@@ -500,6 +537,11 @@ def _civitdl_async_worker(
         model_dict = metadata.get("model_dict", {})
         model_type = model_dict.get("type", "").lower()
         output_dir = MODEL_TYPE_TO_FOLDER.get(model_type, MODEL_ROOT_PATH)
+        update_task(
+            task_id,
+            model_name=model_dict.get("name"),
+            model_type=model_dict.get("type")
+        )
 
         # Get expected file size from metadata
         expected_size = 0
@@ -547,7 +589,7 @@ def _civitdl_async_worker(
                 task_id,
                 status="failed",
                 progress=0,
-                error="Unable to download this model as it requires a valid API Key."
+                error=session.refusal or DOWNLOAD_REFUSED
             )
             return
 
