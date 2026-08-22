@@ -104,7 +104,27 @@ def test_the_task_says_which_model_it_is(client):
     assert task["model_id"] == 16014
     assert task["version_id"] == 28907
     assert task["model_name"] == "Anime Lineart"
-    assert task["model_type"] == "LORA"
+    # Same spelling as ModelInfo.model_type, on both paths.
+    assert task["model_type"] == "lora"
+
+
+def test_a_request_without_a_version_reports_the_one_it_resolved_to(client):
+    """POST /models/{id}/async knows the version only after the metadata call."""
+    with stub_civitdl(writes=[DOWNLOADED]):
+        task_id = client.post("/models/16014/async").json()["task_id"]
+        task = wait_for(client, task_id)
+
+    assert task["version_id"] == 28907
+    assert task["model_name"] == "Anime Lineart"
+
+
+def test_a_cached_model_reports_its_version_too(client):
+    with patch.object(utils, "find_model_files", return_value=[DOWNLOADED]), \
+            patch.object(utils, "get_safe_metadata", return_value=METADATA):
+        task_id = client.post("/models/16014/async").json()["task_id"]
+        task = wait_for(client, task_id)
+
+    assert task["version_id"] == 28907
 
 
 def test_a_download_that_writes_nothing_fails_with_a_reason(client):
@@ -134,6 +154,10 @@ def test_an_already_downloaded_model_finishes_without_downloading(client):
 
     assert task["status"] == "finished"
     assert task["progress"] == 100
+    # The task says which model it is on this path too, not only after a
+    # download: a caller polling /status should not have to dig into result.
+    assert task["model_name"] == DOWNLOADED.name
+    assert task["model_type"] == DOWNLOADED.model_type.value
 
 
 def test_the_image_ships_a_single_uvicorn_worker():

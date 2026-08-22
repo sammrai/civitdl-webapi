@@ -149,5 +149,5 @@ def test_the_task_records_which_model_it_was(civitdl):
     task = utils.get_task(task_id)
     assert task["status"] == "failed"
     assert task["model_name"] == "Heime"
-    assert task["model_type"] == "LORA"
+    assert task["model_type"] == "lora"
     assert task["error"] == DISABLED

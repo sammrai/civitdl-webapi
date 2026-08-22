@@ -42,8 +42,9 @@ class TaskStatus(BaseModel):
     progress: int  # 0-100
     model_id: int
     version_id: Optional[int]
-    # Filled in once the Civitai metadata is fetched, so a failed task still
-    # says which model it was. Civitai's own spelling, e.g. "LORA".
+    # Which model the task is for, so a failed task still says what it was
+    # downloading. Same spelling as ModelInfo.model_type, e.g. "lora"; a plain
+    # str because Civitai has types this API has no enum member for.
     model_name: Optional[str] = None
     model_type: Optional[str] = None
     result: Optional[ModelInfo]
