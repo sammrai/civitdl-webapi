@@ -5,17 +5,37 @@ for downloading Civitai models into a Stable Diffusion WebUI layout.
 
 ## Running the tests
 
-The code needs `civitdl`, which is only installed inside the image. Mount the
-source instead of rebuilding — a rebuild per edit is slow and unnecessary:
-
 ```sh
-docker run --rm -v "$PWD":/app -e PYTHONPATH=/app <image> pytest -m "not integration"
+docker build -t civitdl-dev .    # once, and again only when the Dockerfile changes
+docker run --rm -v "$PWD":/app -e PYTHONPATH=/app civitdl-dev pytest -m "not integration"
 ```
 
-`-m "not integration"` is the scope CI uses. Without it you also run
-`test/test_integration_main.py`, which downloads real models from civitai.com.
+The source is mounted, so editing code never needs a rebuild — the image only
+supplies `civitdl`, which is why the tests cannot run on the host. The run takes
+about a second.
 
-If the container is already up: `docker-compose exec python-dev pytest test/`.
+`-m "not integration"` is the scope CI gates on. Drop it to also run
+`test/test_integration_main.py`, which downloads real models from civitai.com.
+Anything else pytest takes works too: `... civitdl-dev pytest -k listing -x`.
+
+## Before committing
+
+1. Run the tests above. That is exactly what CI gates on, so a pass here means
+   the PR check passes.
+2. If the change touches downloading, drive the real API too (next section).
+   The unit tests mock civitdl, so they cannot tell you whether Civitai still
+   answers the way the code assumes.
+3. New behaviour needs a test that **fails without the fix**. Check that it
+   does: `git worktree add --detach /tmp/old <commit-before>`, copy the new test
+   files in, run them there. A test that passes against the broken code is not
+   a test — two real bugs here survived for a long time behind tests that mocked
+   the very function that had the bug.
+4. Leave local `docker-compose.yml` edits out of the commit (`build:`, `.:/app`,
+   `--reload`). They are for running against a working tree, not for users.
+5. Branch off `main`; do not commit to it directly.
+
+CI runs the tests between `Build` and `Push`, on purpose: a failing test must not
+publish an image.
 
 ## Checking behaviour against the real API
 
