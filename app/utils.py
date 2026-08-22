@@ -32,6 +32,7 @@ MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
 }
 
 DOWNLOAD_REFUSED = "Unable to download this model as it requires a valid API Key."
+RATE_LIMITED = "Civitai is rate limiting this client. Try again later."
 
 
 class _CivitaiSession(requests.Session):
@@ -476,6 +477,8 @@ def _civitdl(
         return downloaded[0]
 
     except APIException as e:
+        if e.status_code == 429:
+            raise HTTPException(status_code=429, detail=RATE_LIMITED) from e
         raise HTTPException(status_code=404, detail="Model not found on Civitai.") from e
     except AssertionError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -641,7 +644,7 @@ def _civitdl_async_worker(
             task_id,
             status="failed",
             progress=0,
-            error="Model not found on Civitai."
+            error=RATE_LIMITED if e.status_code == 429 else "Model not found on Civitai."
         )
     except AssertionError as e:
         update_task(
