@@ -555,11 +555,14 @@ def _civitdl_async_worker(
         update_task(task_id, status="downloading", progress=1)
         existing_models = find_model_files(model_id, version_id)
         if len(existing_models) >= 1:
+            existing = existing_models[0]
             update_task(
                 task_id,
                 status="finished",
                 progress=100,
-                result=existing_models[0]
+                model_name=existing.name or None,
+                model_type=existing.model_type.value,
+                result=existing
             )
             return
 
@@ -575,8 +578,8 @@ def _civitdl_async_worker(
         output_dir = MODEL_TYPE_TO_FOLDER.get(model_type, MODEL_ROOT_PATH)
         update_task(
             task_id,
-            model_name=model_dict.get("name"),
-            model_type=model_dict.get("type")
+            model_name=model_dict.get("name") or None,
+            model_type=model_type or None
         )
         resolved_model_id = int(metadata["model_id"])
         resolved_version_id = int(metadata["version_id"])

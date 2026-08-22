@@ -104,7 +104,8 @@ def test_the_task_says_which_model_it_is(client):
     assert task["model_id"] == 16014
     assert task["version_id"] == 28907
     assert task["model_name"] == "Anime Lineart"
-    assert task["model_type"] == "LORA"
+    # Same spelling as ModelInfo.model_type, on both paths.
+    assert task["model_type"] == "lora"
 
 
 def test_a_download_that_writes_nothing_fails_with_a_reason(client):
@@ -134,6 +135,10 @@ def test_an_already_downloaded_model_finishes_without_downloading(client):
 
     assert task["status"] == "finished"
     assert task["progress"] == 100
+    # The task says which model it is on this path too, not only after a
+    # download: a caller polling /status should not have to dig into result.
+    assert task["model_name"] == DOWNLOADED.name
+    assert task["model_type"] == DOWNLOADED.model_type.value
 
 
 def test_the_image_ships_a_single_uvicorn_worker():
