@@ -5,6 +5,9 @@ on:
     branches:
       - "main"
       - "test"
+  pull_request:
+    branches:
+      - "main"
 
 jobs:
   docker-build:
@@ -18,14 +21,29 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
 
+      # Pull requests only build and test; secrets are not needed for that.
       - name: Login to Docker Hub
+        if: github.event_name == 'push'
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push (main)
-        if: github.ref == 'refs/heads/main'
+      - name: Build
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          load: true
+          tags: ${{ github.repository }}:${{ github.sha }}
+
+      # Runs before any push, so a failing test cannot publish an image.
+      - name: Run tests
+        run: |
+          docker run -v $(pwd):/work --rm \
+            ${{ github.repository }}:${{ github.sha }} pytest
+
+      - name: Push (main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v4
         with:
           context: .
@@ -34,13 +52,8 @@ jobs:
             ${{ github.repository }}:${{ github.sha }}
             ${{ github.repository }}:latest
 
-      - name: Run tests
-        run: |
-          docker run -v $(pwd):/work --rm \
-            ${{ github.repository }}:${{ github.sha }} pytest
-
-      - name: Build and push (test)
-        if: github.ref == 'refs/heads/test'
+      - name: Push (test)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/test'
         uses: docker/build-push-action@v4
         with:
           context: .
@@ -52,6 +65,7 @@ jobs:
 
   generate-redoc:
     needs: docker-build
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
