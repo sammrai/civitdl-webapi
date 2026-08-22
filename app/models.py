@@ -39,5 +39,9 @@ class TaskStatus(BaseModel):
     progress: int  # 0-100
     model_id: int
     version_id: Optional[int]
+    # Filled in once the Civitai metadata is fetched, so a failed task still
+    # says which model it was. Civitai's own spelling, e.g. "LORA".
+    model_name: Optional[str] = None
+    model_type: Optional[str] = None
     result: Optional[ModelInfo]
     error: Optional[str]
