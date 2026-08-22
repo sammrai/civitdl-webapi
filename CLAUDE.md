@@ -17,6 +17,55 @@ docker run --rm -v "$PWD":/app -e PYTHONPATH=/app <image> pytest -m "not integra
 
 If the container is already up: `docker-compose exec python-dev pytest test/`.
 
+## Checking behaviour against the real API
+
+Unit tests cannot reach the parts that matter most here — what Civitai actually
+answers, and whether a download happens once or three times. Run the container
+and drive it:
+
+```sh
+docker run -d --name check -v /tmp/chk:/data -e MODEL_ROOT_PATH=/data \
+  -e CIVITAI_TOKEN="$CIVITAI_TOKEN" -p 17681:7681 <image>
+```
+
+Models that exercise each path:
+
+| Model | What it is | Expected |
+|---|---|---|
+| `16014/28907` | 18MB public LoRA, sha256 `2fcd88e6…` | 200, downloads in ~1s |
+| `2805786/3163627` | `usageControl: "Generation"` — creator disabled downloads | 401 `The creator of this asset has disabled downloads on this file` |
+| `999999999` | does not exist | 404 `Model not found on Civitai.` |
+| `1703224/2694012` | 6.9GB checkpoint | for anything needing a long download window |
+
+Duplicate suppression — three simultaneous requests must run civitdl once:
+
+```sh
+for i in 1 2 3; do curl -s -o /dev/null -X POST \
+  http://localhost:17681/models/16014/versions/28907/async & done; wait; sleep 30
+docker logs check 2>&1 | grep -c 'Now downloading'      # 1, was 5 before the lock
+```
+
+Use a **fresh container** for that count. `docker logs` is cumulative, so an
+earlier download in the same container inflates it — and a refused download logs
+"Now downloading" twice, once per retry.
+
+`/status` reachability — poll one task id with the connection closed each time:
+
+```sh
+for i in $(seq 1 20); do curl -s -H 'Connection: close' -o /dev/null \
+  -w '%{http_code} ' http://localhost:17681/status/$TID; done      # 20x 200
+```
+
+Keep-alive is what hid the multi-worker bug: one reused connection sticks to one
+worker and answers 200 every time. Without `Connection: close` this check proves
+nothing.
+
+Downloaded files can be checked against Civitai's own hash:
+
+```sh
+curl -s https://civitai.com/api/v1/model-versions/28907 | jq -r '.files[].hashes.SHA256'
+```
+
 ## Civitai rate limiting
 
 Running the integration suite repeatedly gets the host 429'd:
