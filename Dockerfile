@@ -7,4 +7,7 @@ RUN pip install --no-cache-dir uvicorn==0.33.0 fastapi==0.115.8 civitdl==2.1.1 h
 COPY . .
 ENV PYTHONPATH=/app
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7681", "--workers", "4", "--log-level", "warning"]
+# One worker only: the async download tasks live in a process-local dict, so
+# extra workers each get their own copy and GET /status/{task_id} 404s
+# whenever it lands on a worker that did not create the task.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7681", "--workers", "1", "--log-level", "warning"]
