@@ -11,6 +11,9 @@ class ModelType(enum.Enum):
     VAE = "vae"
     CHECKPOINT = "checkpoint"
     TEXTUALINVERSION = "textualinversion"
+    # A model file whose extra_data metadata is missing. Without this the whole
+    # listing fails validation because of one unreadable directory.
+    UNKNOWN = "unknown"
 
 # --- Data Models ---
 class ModelInfo(BaseModel):
