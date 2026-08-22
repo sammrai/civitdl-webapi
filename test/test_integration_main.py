@@ -28,6 +28,10 @@ def client(model_root_path, civitai_token, monkeypatch):
     with TestClient(app) as c:
         yield c
 
+# These hit civitai.com for real: they download models over the network and
+# are subject to Civitai's rate limiting, so CI runs with -m "not integration".
+pytestmark = pytest.mark.integration
+
 # Predefined model IDs and their types
 MODEL_TEST_DATA = [
     {"model_id": 28205  , "type": "lora"            , "version_id": 47670},

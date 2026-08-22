@@ -134,6 +134,11 @@ curl -X GET "http://localhost:7681/models/"
 docker-compose exec python-dev pytest test/
 ```
 
+`test/test_integration_main.py` downloads real models from civitai.com. CI skips
+it (`pytest -m "not integration"`) because repeated runs hit Civitai's rate limit
+and fail with errors unrelated to the change under test. Run it locally, and
+sparingly.
+
 ## Persistent Storage
 
 The following volume is defined in `docker-compose.yml` to persist downloaded models:
