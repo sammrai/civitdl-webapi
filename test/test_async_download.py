@@ -108,6 +108,25 @@ def test_the_task_says_which_model_it_is(client):
     assert task["model_type"] == "lora"
 
 
+def test_a_request_without_a_version_reports_the_one_it_resolved_to(client):
+    """POST /models/{id}/async knows the version only after the metadata call."""
+    with stub_civitdl(writes=[DOWNLOADED]):
+        task_id = client.post("/models/16014/async").json()["task_id"]
+        task = wait_for(client, task_id)
+
+    assert task["version_id"] == 28907
+    assert task["model_name"] == "Anime Lineart"
+
+
+def test_a_cached_model_reports_its_version_too(client):
+    with patch.object(utils, "find_model_files", return_value=[DOWNLOADED]), \
+            patch.object(utils, "get_safe_metadata", return_value=METADATA):
+        task_id = client.post("/models/16014/async").json()["task_id"]
+        task = wait_for(client, task_id)
+
+    assert task["version_id"] == 28907
+
+
 def test_a_download_that_writes_nothing_fails_with_a_reason(client):
     with stub_civitdl(writes=None), \
             patch("requests.Session.get", return_value=MagicMock(status_code=200)):

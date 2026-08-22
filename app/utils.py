@@ -560,6 +560,7 @@ def _civitdl_async_worker(
                 task_id,
                 status="finished",
                 progress=100,
+                version_id=existing.version_id,
                 model_name=existing.name or None,
                 model_type=existing.model_type.value,
                 result=existing
@@ -576,13 +577,15 @@ def _civitdl_async_worker(
         model_dict = metadata.get("model_dict", {})
         model_type = model_dict.get("type", "").lower()
         output_dir = MODEL_TYPE_TO_FOLDER.get(model_type, MODEL_ROOT_PATH)
+        resolved_model_id = int(metadata["model_id"])
+        resolved_version_id = int(metadata["version_id"])
+        # A request that omitted the version now knows which one it resolved to.
         update_task(
             task_id,
+            version_id=resolved_version_id,
             model_name=model_dict.get("name") or None,
             model_type=model_type or None
         )
-        resolved_model_id = int(metadata["model_id"])
-        resolved_version_id = int(metadata["version_id"])
 
         # Get expected file size from metadata
         expected_size = 0
