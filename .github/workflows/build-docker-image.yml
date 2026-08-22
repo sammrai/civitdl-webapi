@@ -37,10 +37,12 @@ jobs:
           tags: ${{ github.repository }}:${{ github.sha }}
 
       # Runs before any push, so a failing test cannot publish an image.
+      # Skips test_integration_main.py: it downloads real models from Civitai,
+      # which rate limits CI and fails the run with an unrelated error.
       - name: Run tests
         run: |
           docker run -v $(pwd):/work --rm \
-            ${{ github.repository }}:${{ github.sha }} pytest
+            ${{ github.repository }}:${{ github.sha }} pytest -m "not integration"
 
       - name: Push (main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
