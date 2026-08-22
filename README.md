@@ -125,7 +125,7 @@ curl -X GET "http://localhost:7681/models/"
 ### startup command
 
 ```docker-compose.yml
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7681", "--workers", "4", "--log-level", "warning", "--reload"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7681", "--workers", "1", "--log-level", "warning", "--reload"]
 ```
 
 ### test
