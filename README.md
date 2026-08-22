@@ -131,8 +131,11 @@ curl -X GET "http://localhost:7681/models/"
 ### test
 
 ```
-docker-compose exec python-dev pytest test/
+docker build -t civitdl-dev .
+docker run --rm -v "$PWD":/app -e PYTHONPATH=/app civitdl-dev pytest -m "not integration"
 ```
+
+Drop `-m "not integration"` to run everything.
 
 `test/test_integration_main.py` downloads real models from civitai.com. CI skips
 it (`pytest -m "not integration"`) because repeated runs hit Civitai's rate limit
