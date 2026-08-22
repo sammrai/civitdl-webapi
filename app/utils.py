@@ -11,6 +11,7 @@ from typing import Callable, List, Dict, Any, Optional
 from fastapi import HTTPException
 
 from app.models import ModelInfo
+from app.sorter import sort_model
 from helpers.core.utils import APIException
 from helpers.sourcemanager import SourceManager
 
@@ -31,6 +32,7 @@ MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
 }
 
 DOWNLOAD_REFUSED = "Unable to download this model as it requires a valid API Key."
+RATE_LIMITED = "Civitai is rate limiting this client. Try again later."
 
 
 class _CivitaiSession(requests.Session):
@@ -56,6 +58,17 @@ class _CivitaiSession(requests.Session):
 # Task management for async downloads
 _download_tasks: Dict[str, Dict[str, Any]] = {}
 _tasks_lock = threading.Lock()
+
+# One lock per model version. Two requests for the same version would both see
+# no local file and both start civitdl, which writes to the same .tmp path.
+_download_locks: Dict[tuple, threading.Lock] = {}
+_download_locks_guard = threading.Lock()
+
+
+def _download_lock(model_id: int, version_id: int) -> threading.Lock:
+    """Get the lock that serializes downloads of one model version."""
+    with _download_locks_guard:
+        return _download_locks.setdefault((model_id, version_id), threading.Lock())
 
 
 def create_task_id() -> str:
@@ -92,6 +105,16 @@ def update_task(task_id: str, **kwargs) -> None:
     with _tasks_lock:
         if task_id in _download_tasks:
             _download_tasks[task_id].update(kwargs)
+
+
+def _model_dir(metadata: Dict[str, Any], output_dir: str) -> str:
+    """Where civitdl's sorter will put this model version."""
+    return sort_model(
+        metadata.get("model_dict") or {},
+        metadata.get("version_dict") or {},
+        "",
+        output_dir
+    ).model_dir_path
 
 
 def _get_tmp_file_size(base_dir: str) -> int:
@@ -424,31 +447,38 @@ def _civitdl(
         source_strings = args.pop("source_strings", None)
         root_dir = args.pop("rootdir", None)
 
-        batch_options = BatchOptions(**args)
-        batch_options.session = _CivitaiSession()
+        resolved_model_id = int(metadata["model_id"])
+        resolved_version_id = int(metadata["version_id"])
+        session = _CivitaiSession()
 
-        batch_download(
-            source_strings=source_strings,
-            rootdir=root_dir if root_dir != "None" else None,
-            batchOptions=batch_options
-        )
-        print(f"Model {model_id_str} has been successfully downloaded to {output_dir}.")
+        with _download_lock(resolved_model_id, resolved_version_id):
+            # A concurrent request for the same version may have finished it
+            # while this one waited for the lock.
+            if not find_model_files(resolved_model_id, resolved_version_id):
+                batch_options = BatchOptions(**args)
+                batch_options.session = session
 
-        downloaded = find_model_files(
-            int(metadata["model_id"]),
-            int(metadata["version_id"])
-        )
+                batch_download(
+                    source_strings=source_strings,
+                    rootdir=root_dir if root_dir != "None" else None,
+                    batchOptions=batch_options
+                )
+                print(f"Model {model_id_str} has been successfully downloaded to {output_dir}.")
+
+            downloaded = find_model_files(resolved_model_id, resolved_version_id)
 
         if len(downloaded) == 0:
             raise HTTPException(
                 status_code=401,
-                detail=batch_options.session.refusal or DOWNLOAD_REFUSED
+                detail=session.refusal or DOWNLOAD_REFUSED
             )
         if len(downloaded) > 1:
             raise HTTPException(status_code=500, detail="Unexpected error occurred.")
         return downloaded[0]
 
     except APIException as e:
+        if e.status_code == 429:
+            raise HTTPException(status_code=429, detail=RATE_LIMITED) from e
         raise HTTPException(status_code=404, detail="Model not found on Civitai.") from e
     except AssertionError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -501,14 +531,20 @@ def _civitdl_async_worker(
             source_strings = args.pop("source_strings", None)
             root_dir = args.pop("rootdir", None)
 
-            batch_options = BatchOptions(**args)
-            batch_options.session = session
+            with _download_lock(resolved_model_id, resolved_version_id):
+                # A concurrent request for the same version may have finished
+                # it while this one waited for the lock.
+                if find_model_files(resolved_model_id, resolved_version_id):
+                    return
 
-            batch_download(
-                source_strings=source_strings,
-                rootdir=root_dir if root_dir != "None" else None,
-                batchOptions=batch_options
-            )
+                batch_options = BatchOptions(**args)
+                batch_options.session = session
+
+                batch_download(
+                    source_strings=source_strings,
+                    rootdir=root_dir if root_dir != "None" else None,
+                    batchOptions=batch_options
+                )
         except Exception as e:
             download_error[0] = e
         finally:
@@ -542,6 +578,8 @@ def _civitdl_async_worker(
             model_name=model_dict.get("name"),
             model_type=model_dict.get("type")
         )
+        resolved_model_id = int(metadata["model_id"])
+        resolved_version_id = int(metadata["version_id"])
 
         # Get expected file size from metadata
         expected_size = 0
@@ -564,7 +602,7 @@ def _civitdl_async_worker(
         # Monitor progress by checking .tmp file sizes
         while not download_complete.is_set():
             if expected_size > 0:
-                current_size = _get_tmp_file_size(output_dir)
+                current_size = _get_tmp_file_size(_model_dir(metadata, output_dir))
                 progress = min(5 + int((current_size / expected_size) * 90), 95)
                 update_task(task_id, progress=progress)
             download_complete.wait(timeout=0.5)
@@ -606,7 +644,7 @@ def _civitdl_async_worker(
             task_id,
             status="failed",
             progress=0,
-            error="Model not found on Civitai."
+            error=RATE_LIMITED if e.status_code == 429 else "Model not found on Civitai."
         )
     except AssertionError as e:
         update_task(
