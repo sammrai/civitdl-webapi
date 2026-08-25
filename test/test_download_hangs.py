@@ -164,7 +164,8 @@ def partial_download(root, name="Heime-mid_2805786-vid_3163627"):
     """What civitdl writes before it gets to the model file."""
     extra_data = root / name / "extra_data-vid_3163627"
     extra_data.mkdir(parents=True)
-    (extra_data / "model_dict-mid_2805786-vid_3163627.json").write_text("{}")
+    (extra_data / "model_dict-mid_2805786-vid_3163627.json").write_text(
+        '{"type": "LORA", "name": "Heime"}')
     (extra_data / "137756956.jpeg").write_bytes(b"\xff\xd8\xff")
     return root / name
 
@@ -183,6 +184,24 @@ def test_a_metadata_only_directory_is_not_left_behind(civitdl, tmp_path):
 
     assert utils.get_task(task_id)["status"] == "failed"
     assert not model_dir.exists()
+
+
+def test_a_finished_download_keeps_its_directory(civitdl, tmp_path):
+    """The cleanup runs after every download, so it has to know a good one."""
+    def wrote_the_model(*args, **kwargs):
+        model_dir = partial_download(tmp_path)
+        (model_dir / "heime_v10-mid_2805786-vid_3163627.safetensors").write_bytes(b"weights")
+
+    civitdl.side_effect = wrote_the_model
+
+    task_id = utils.create_task(2805786, 3163627)
+    with patch.object(utils, "MODEL_ROOT_PATH", str(tmp_path)), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"lora": str(tmp_path)}), \
+            patch.object(utils, "get_safe_metadata", return_value=METADATA):
+        utils._civitdl_async_worker(task_id, 2805786, 3163627, "key")
+
+    assert utils.get_task(task_id)["status"] == "finished"
+    assert (tmp_path / "Heime-mid_2805786-vid_3163627").exists()
 
 
 def test_a_downloaded_model_is_never_discarded(tmp_path):
