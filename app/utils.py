@@ -25,16 +25,21 @@ CIVITAI_TOKEN = os.getenv("CIVITAI_TOKEN", "")
 
 # civitdl never passes a timeout, so a Civitai connection that goes quiet used
 # to block the download thread for the life of the process. The read timeout is
-# per read, not for the whole transfer: a slow but moving download is fine.
+# how long a transfer may go without receiving *anything*, not how long it may
+# take: a 12GB file over a slow link is fine as long as bytes keep arriving.
+# Five minutes of silence is a dead connection, not a slow one -- and civitdl
+# restarts an aborted download from zero, so erring short is expensive.
 CIVITAI_TIMEOUT = (
     float(os.getenv("CIVITAI_CONNECT_TIMEOUT", "15")),
-    float(os.getenv("CIVITAI_READ_TIMEOUT", "120")),
+    float(os.getenv("CIVITAI_READ_TIMEOUT", "300")),
 )
 
-# How long a download may wait for another download of the same version before
-# giving up. Only a hung holder ever reaches it; a real download releases the
-# lock when it ends.
-DOWNLOAD_LOCK_TIMEOUT = float(os.getenv("DOWNLOAD_LOCK_TIMEOUT", "3600"))
+# How long a download may wait for another download of the same version. This
+# is a backstop against a hold nothing else can explain, not a stall detector:
+# the read timeout is what ends a stalled download, in minutes. It has to stay
+# clear of a legitimately long download -- 12GB over a slow link takes hours,
+# and failing the second request for it with "it is stuck" would be a lie.
+DOWNLOAD_LOCK_TIMEOUT = float(os.getenv("DOWNLOAD_LOCK_TIMEOUT", "86400"))
 
 MODEL_FILE_PATTERN = re.compile(
     r".*-mid_(\d+)(?:-vid_(\d+))?.*\.(safetensors|ckpt|pt)$"
@@ -72,13 +77,36 @@ class _CivitaiSession(requests.Session):
         if kwargs.get("timeout") is None:
             kwargs["timeout"] = CIVITAI_TIMEOUT
         try:
-            return super().request(method, url, **kwargs)
+            response = super().request(method, url, **kwargs)
         except requests.RequestException as error:
-            # civitdl's retry loop swallows this and returns as if it had done
-            # its job. Without it a download that timed out gets reported as a
-            # missing API key.
-            self.transport_error = f"{type(error).__name__} from Civitai: {error}"
+            self._remember(error)
             raise
+        return self._watch_body(response)
+
+    def _remember(self, error: Exception) -> None:
+        # civitdl's retry loop swallows these and returns as if it had done its
+        # job. Without keeping one, a download that timed out is reported as a
+        # missing API key.
+        self.transport_error = f"{type(error).__name__} from Civitai: {error}"
+
+    def _watch_body(self, response):
+        """Keep the reason a streamed body stopped arriving.
+
+        A download stalls mid-file, not while connecting, and that raises out
+        of iter_content -- past the try above, where nothing would see it.
+        """
+        streamed = response.iter_content
+
+        def iter_content(*args, **kwargs):
+            try:
+                for chunk in streamed(*args, **kwargs):
+                    yield chunk
+            except requests.RequestException as error:
+                self._remember(error)
+                raise
+
+        response.iter_content = iter_content
+        return response
 
     def get(self, url, **kwargs):
         response = super().get(url, **kwargs)
