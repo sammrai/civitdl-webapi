@@ -553,9 +553,8 @@ def _civitdl(
                 print(f"Model {model_id_str} has been successfully downloaded to {output_dir}.")
 
             downloaded = find_model_files(resolved_model_id, resolved_version_id)
-            if not downloaded:
-                _discard_partial_download(
-                    _model_dir(metadata, output_dir or MODEL_ROOT_PATH))
+            _discard_partial_download(
+                _model_dir(metadata, output_dir or MODEL_ROOT_PATH))
 
         if len(downloaded) == 0:
             raise HTTPException(
@@ -637,9 +636,11 @@ def _civitdl_async_worker(
                         batchOptions=batch_options
                     )
                 finally:
-                    if not find_model_files(resolved_model_id, resolved_version_id):
-                        _discard_partial_download(
-                            _model_dir(metadata, output_dir or MODEL_ROOT_PATH))
+                    # No find_model_files() guard here: it walks the whole
+                    # library, and _discard_partial_download already keeps a
+                    # directory that has a model file in it.
+                    _discard_partial_download(
+                        _model_dir(metadata, output_dir or MODEL_ROOT_PATH))
         except Exception as e:
             download_error[0] = e
         finally:
