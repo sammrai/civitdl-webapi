@@ -75,6 +75,20 @@ def test_a_download_that_timed_out_does_not_blame_the_api_key(civitdl):
     assert "ReadTimeout" in task["error"]
 
 
+def test_a_body_that_stops_arriving_is_remembered_too():
+    """A download stalls mid-file; that raises out of iter_content, not get()."""
+    response = MagicMock()
+    response.iter_content.side_effect = requests.exceptions.ConnectionError("read timed out")
+
+    session = utils._CivitaiSession()
+    with patch("requests.Session.request", return_value=response):
+        streaming = session.get(DOWNLOAD_URL, stream=True)
+        with pytest.raises(requests.RequestException):
+            list(streaming.iter_content(1024))
+
+    assert "ConnectionError" in session.transport_error
+
+
 # --- a hung download must not wedge the version ------------------------------
 
 def test_a_hung_download_does_not_wedge_later_requests(civitdl):
