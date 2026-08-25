@@ -7,6 +7,7 @@ import requests
 import uuid
 import threading
 
+from contextlib import contextmanager
 from typing import Callable, List, Dict, Any, Optional
 from fastapi import HTTPException
 
@@ -21,6 +22,23 @@ from civitdl.batch.batch_download import batch_download, BatchOptions
 
 MODEL_ROOT_PATH = os.getenv("MODEL_ROOT_PATH", "/data")
 CIVITAI_TOKEN = os.getenv("CIVITAI_TOKEN", "")
+
+# civitdl never passes a timeout, so a Civitai connection that goes quiet used
+# to block the download thread for the life of the process. The read timeout is
+# per read, not for the whole transfer: a slow but moving download is fine.
+CIVITAI_TIMEOUT = (
+    float(os.getenv("CIVITAI_CONNECT_TIMEOUT", "15")),
+    float(os.getenv("CIVITAI_READ_TIMEOUT", "120")),
+)
+
+# How long a download may wait for another download of the same version before
+# giving up. Only a hung holder ever reaches it; a real download releases the
+# lock when it ends.
+DOWNLOAD_LOCK_TIMEOUT = float(os.getenv("DOWNLOAD_LOCK_TIMEOUT", "3600"))
+
+MODEL_FILE_PATTERN = re.compile(
+    r".*-mid_(\d+)(?:-vid_(\d+))?.*\.(safetensors|ckpt|pt)$"
+)
 
 MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
     "lora": os.path.join(MODEL_ROOT_PATH, "models", "Lora"),
@@ -37,13 +55,30 @@ RATE_LIMITED = "Civitai is rate limiting this client. Try again later."
 
 class _CivitaiSession(requests.Session):
     """
-    Session that remembers why Civitai refused a download.
+    Session that remembers why Civitai refused a download, and that gives up.
 
     civitdl reports every refusal as a missing API key, discarding the reason
-    Civitai gave, so keep it from the response civitdl already made.
+    Civitai gave, so keep it from the response civitdl already made. It also
+    never passes a timeout, so add one: a stalled connection used to keep the
+    download thread alive with nothing to show for it until the process died.
     """
 
     refusal = None
+    transport_error = None
+
+    def request(self, method, url, **kwargs):
+        # civitdl calls session.get() without a timeout, both for the metadata
+        # and for the streamed model body, so supply one here.
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = CIVITAI_TIMEOUT
+        try:
+            return super().request(method, url, **kwargs)
+        except requests.RequestException as error:
+            # civitdl's retry loop swallows this and returns as if it had done
+            # its job. Without it a download that timed out gets reported as a
+            # missing API key.
+            self.transport_error = f"{type(error).__name__} from Civitai: {error}"
+            raise
 
     def get(self, url, **kwargs):
         response = super().get(url, **kwargs)
@@ -69,6 +104,52 @@ def _download_lock(model_id: int, version_id: int) -> threading.Lock:
     """Get the lock that serializes downloads of one model version."""
     with _download_locks_guard:
         return _download_locks.setdefault((model_id, version_id), threading.Lock())
+
+
+@contextmanager
+def _hold_download_lock(model_id: int, version_id: int):
+    """Serialize downloads of one version, but never wait on it forever.
+
+    A download that hung held this lock for the life of the process, and every
+    later request for the same version blocked here *before* creating anything:
+    no directory, no `.tmp`, no civitdl log line, no error -- the task just sat
+    at "downloading" until the container was restarted.
+    """
+    lock = _download_lock(model_id, version_id)
+    if not lock.acquire(timeout=DOWNLOAD_LOCK_TIMEOUT):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Another download of model {model_id} version {version_id} has "
+                f"held the download lock for over {int(DOWNLOAD_LOCK_TIMEOUT)}s. "
+                "It is stuck; restart the service to clear it."
+            ),
+        )
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+def _discard_partial_download(model_dir: str) -> None:
+    """Delete a model directory that never got a model file.
+
+    civitdl writes the metadata and the preview images before the model itself,
+    so a download that dies in between leaves a directory the rest of the API
+    cannot see: `find_model_files` only matches model files, so GET and DELETE
+    both 404 while the directory sits on disk and confuses the next attempt.
+    """
+    if not model_dir or not os.path.isdir(model_dir):
+        return
+
+    for root, _, files in os.walk(model_dir):
+        if ".tmp" in root:
+            continue  # an interrupted body, not a model file
+        if any(MODEL_FILE_PATTERN.match(file) for file in files):
+            return
+
+    print(f"Discarding partial download at {model_dir}.")
+    shutil.rmtree(model_dir, ignore_errors=True)
 
 
 def create_task_id() -> str:
@@ -136,6 +217,30 @@ def get_available_disk_space(path: str) -> int:
     return stat.f_bavail * stat.f_frsize
 
 
+def _primary_file_size(metadata: Dict[str, Any]) -> int:
+    """Size in bytes of the file civitdl will download for this version.
+
+    The requested version is not always the first entry of modelVersions, so
+    reading the files off modelVersions[0] sized whichever version Civitai
+    happened to list first.
+    """
+    files = (metadata.get("version_dict") or {}).get("files") or []
+
+    if not files:
+        version_id = str(metadata.get("version_id", ""))
+        model_dict = metadata.get("model_dict") or {}
+        for version in model_dict.get("modelVersions", []):
+            if str(version.get("id")) == version_id:
+                files = version.get("files") or []
+                break
+
+    for file in files:
+        if file.get("primary", False):
+            return int(file.get("sizeKB", 0) * 1024)
+
+    return int(files[0].get("sizeKB", 0) * 1024) if files else 0
+
+
 def get_model_file_size(model_id: int, version_id: Optional[int] = None) -> int:
     """Get expected file size in bytes from Civitai API metadata."""
     if version_id:
@@ -143,22 +248,7 @@ def get_model_file_size(model_id: int, version_id: Optional[int] = None) -> int:
     else:
         model_id_str = str(model_id)
 
-    metadata = get_safe_metadata(model_id_str)
-    model_dict = metadata.get("model_dict", {})
-    model_versions = model_dict.get("modelVersions", [])
-
-    if not model_versions:
-        return 0
-
-    files = model_versions[0].get("files", [])
-    for file in files:
-        if file.get("primary", False):
-            return int(file.get("sizeKB", 0) * 1024)
-
-    if files:
-        return int(files[0].get("sizeKB", 0) * 1024)
-
-    return 0
+    return _primary_file_size(get_safe_metadata(model_id_str))
 
 
 def check_disk_space(model_id: int, version_id: Optional[int] = None) -> None:
@@ -259,7 +349,7 @@ def get_safe_metadata(model_str: str) -> Dict[str, Any]:
     metadata = Metadata(
         nsfw_mode="0",
         max_images=0,
-        session=requests.session()
+        session=_CivitaiSession()
     ).make_api_call(parsed_id)
 
     assert metadata.model_id == parsed_id.model_id, f"Model {parsed_id} not found."
@@ -297,9 +387,6 @@ def find_model_files(
     specific_version = find_model_files(model_id=12345, version_id=1)
     ```
     """
-    model_pattern = re.compile(
-        r".*-mid_(\d+)(?:-vid_(\d+))?.*\.(safetensors|ckpt|pt)$"
-    )
     found_models = []
 
     for root, _, files in os.walk(MODEL_ROOT_PATH):
@@ -307,7 +394,7 @@ def find_model_files(
             continue
 
         for file in files:
-            match = model_pattern.match(file)
+            match = MODEL_FILE_PATTERN.match(file)
             if not match:
                 continue
 
@@ -451,7 +538,7 @@ def _civitdl(
         resolved_version_id = int(metadata["version_id"])
         session = _CivitaiSession()
 
-        with _download_lock(resolved_model_id, resolved_version_id):
+        with _hold_download_lock(resolved_model_id, resolved_version_id):
             # A concurrent request for the same version may have finished it
             # while this one waited for the lock.
             if not find_model_files(resolved_model_id, resolved_version_id):
@@ -466,11 +553,14 @@ def _civitdl(
                 print(f"Model {model_id_str} has been successfully downloaded to {output_dir}.")
 
             downloaded = find_model_files(resolved_model_id, resolved_version_id)
+            if not downloaded:
+                _discard_partial_download(
+                    _model_dir(metadata, output_dir or MODEL_ROOT_PATH))
 
         if len(downloaded) == 0:
             raise HTTPException(
                 status_code=401,
-                detail=session.refusal or DOWNLOAD_REFUSED
+                detail=session.refusal or session.transport_error or DOWNLOAD_REFUSED
             )
         if len(downloaded) > 1:
             raise HTTPException(status_code=500, detail="Unexpected error occurred.")
@@ -531,7 +621,7 @@ def _civitdl_async_worker(
             source_strings = args.pop("source_strings", None)
             root_dir = args.pop("rootdir", None)
 
-            with _download_lock(resolved_model_id, resolved_version_id):
+            with _hold_download_lock(resolved_model_id, resolved_version_id):
                 # A concurrent request for the same version may have finished
                 # it while this one waited for the lock.
                 if find_model_files(resolved_model_id, resolved_version_id):
@@ -540,11 +630,16 @@ def _civitdl_async_worker(
                 batch_options = BatchOptions(**args)
                 batch_options.session = session
 
-                batch_download(
-                    source_strings=source_strings,
-                    rootdir=root_dir if root_dir != "None" else None,
-                    batchOptions=batch_options
-                )
+                try:
+                    batch_download(
+                        source_strings=source_strings,
+                        rootdir=root_dir if root_dir != "None" else None,
+                        batchOptions=batch_options
+                    )
+                finally:
+                    if not find_model_files(resolved_model_id, resolved_version_id):
+                        _discard_partial_download(
+                            _model_dir(metadata, output_dir or MODEL_ROOT_PATH))
         except Exception as e:
             download_error[0] = e
         finally:
@@ -587,17 +682,8 @@ def _civitdl_async_worker(
             model_type=model_type or None
         )
 
-        # Get expected file size from metadata
-        expected_size = 0
-        model_versions = model_dict.get("modelVersions", [])
-        if model_versions:
-            files = model_versions[0].get("files", [])
-            for file in files:
-                if file.get("primary", False):
-                    expected_size = int(file.get("sizeKB", 0) * 1024)
-                    break
-            if expected_size == 0 and files:
-                expected_size = int(files[0].get("sizeKB", 0) * 1024)
+        # Get expected file size from metadata, for the version asked for
+        expected_size = _primary_file_size(metadata)
 
         update_task(task_id, progress=5)
 
@@ -633,7 +719,7 @@ def _civitdl_async_worker(
                 task_id,
                 status="failed",
                 progress=0,
-                error=session.refusal or DOWNLOAD_REFUSED
+                error=session.refusal or session.transport_error or DOWNLOAD_REFUSED
             )
             return
 
@@ -658,6 +744,13 @@ def _civitdl_async_worker(
             status="failed",
             progress=0,
             error=str(e)
+        )
+    except HTTPException as e:
+        update_task(
+            task_id,
+            status="failed",
+            progress=0,
+            error=e.detail
         )
     except Exception as e:
         print(f"Download failed for model {model_id}: {e}")

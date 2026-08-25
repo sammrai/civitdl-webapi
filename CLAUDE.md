@@ -120,6 +120,22 @@ Read `APIException.status_code`, and read the message off the response through
 `_CivitaiSession`, which keeps the body of a 401/403 from the request civitdl
 already made. Do not issue a second request to Civitai to find out why.
 
+**A hung download used to wedge that version for good.** civitdl passes no
+timeout to `requests`, so a Civitai connection that goes quiet blocked the
+download thread for the life of the process — while holding the per-version
+lock. Every later request for the same version then blocked *before* creating
+anything: no directory, no `.tmp`, no "Now downloading" line, no error, just
+`status: downloading, progress: 5` until the container was restarted. Other
+models kept working, because the lock is keyed by `(model_id, version_id)`, so
+it looks like "only this one model is broken". `_CivitaiSession` now supplies
+`CIVITAI_TIMEOUT` on every request and `_hold_download_lock` waits at most
+`DOWNLOAD_LOCK_TIMEOUT`.
+
+**civitdl only downloads the version's primary file.** `model_download_url` is
+`version_dict["downloadUrl"]`, one file. A version that ships a VAE next to the
+checkpoint (`ae.safetensors`) gets the checkpoint only — not a bug in this
+wrapper, but the file will not be there.
+
 **civitdl can fail without raising.** Its retry loop catches the exception and
 returns normally, leaving no model file. Treat "finished but wrote nothing" as a
 failure, not as success.
