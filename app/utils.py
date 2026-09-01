@@ -390,6 +390,68 @@ def get_safe_metadata(model_str: str) -> Dict[str, Any]:
     return json.loads(json.dumps(metadata.__dict__, default=_serialize))
 
 
+def _read_extra_data(extra_data_path: str, version_id: Optional[int]) -> dict:
+    """Read the metadata civitdl saved next to a model file.
+
+    Everything a `ModelInfo` knows beyond its path comes from this one JSON, so
+    nothing here talks to Civitai. A directory with no `extra_data` still has to
+    list -- that is what `model_type="unknown"` is for -- so every field falls
+    back to a value the response model accepts.
+    """
+    extra = {
+        "model_type": "unknown",
+        "name": "",
+        "description": "",
+        "created_at": "",
+    }
+    if not os.path.exists(extra_data_path):
+        return extra
+
+    with open(extra_data_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    extra["model_type"] = data.get("type", "").lower()
+    extra["name"] = data.get("name", "")
+    extra["description"] = data.get("description", "")
+    extra["tags"] = data.get("tags") or []
+    extra["nsfw"] = data.get("nsfw")
+    extra["nsfw_level"] = data.get("nsfwLevel")
+    extra["creator"] = (data.get("creator") or {}).get("username")
+
+    # Find the version in modelVersions array
+    version = next(
+        (v for v in data.get("modelVersions", [])
+         if v.get("id") == version_id),
+        None,
+    )
+    if version is None:
+        return extra
+
+    extra["created_at"] = version.get("createdAt", "")
+    extra["published_at"] = version.get("publishedAt")
+    extra["base_model"] = version.get("baseModel")
+    extra["base_model_type"] = version.get("baseModelType")
+    extra["version_name"] = version.get("name")
+    extra["version_description"] = version.get("description")
+    extra["trained_words"] = version.get("trainedWords") or []
+
+    stats = version.get("stats") or {}
+    extra["download_count"] = stats.get("downloadCount")
+    extra["thumbs_up_count"] = stats.get("thumbsUpCount")
+
+    # civitdl only ever downloads the primary file, so that is the one whose
+    # size and hash describe what is actually on disk.
+    files = version.get("files") or []
+    primary = next((f for f in files if f.get("primary")), None)
+    if primary is None and files:
+        primary = files[0]
+    if primary:
+        extra["file_size_kb"] = primary.get("sizeKB")
+        extra["sha256"] = (primary.get("hashes") or {}).get("SHA256")
+
+    return extra
+
+
 def find_model_files(
     model_id: Optional[int] = None,
     version_id: Optional[int] = None
@@ -437,22 +499,7 @@ def find_model_files(
                     f"model_dict-mid_{found_model_id}-vid_{found_version_id}.json"
                 )
 
-                model_type = "unknown"
-                name = ""
-                description = ""
-                created_at = ""
-                if os.path.exists(extra_data_path):
-                    with open(extra_data_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        model_type = data.get("type", "").lower()
-                        name = data.get("name", "")
-                        description = data.get("description", "")
-                        # Find the version in modelVersions array
-                        model_versions = data.get("modelVersions", [])
-                        for version in model_versions:
-                            if version.get("id") == found_version_id:
-                                created_at = version.get("createdAt", "")
-                                break
+                extra = _read_extra_data(extra_data_path, found_version_id)
 
                 found_models.append(
                     ModelInfo(
@@ -460,10 +507,7 @@ def find_model_files(
                         version_id=found_version_id,
                         model_dir=root,
                         filename=file,
-                        model_type=model_type,
-                        name=name,
-                        description=description,
-                        created_at=created_at
+                        **extra
                     )
                 )
 
