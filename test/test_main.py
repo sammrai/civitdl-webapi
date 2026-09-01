@@ -31,6 +31,27 @@ mock_models = [
 ]
 
 
+# Fields ModelInfo reads from the saved extra_data. The mocks below stand in for
+# find_model_files, so none of them are set; spelling out the defaults keeps the
+# assertions exact -- an unexpected key in the response still fails.
+EXTRA_DEFAULTS = {
+    "base_model": None,
+    "base_model_type": None,
+    "version_name": None,
+    "version_description": None,
+    "published_at": None,
+    "trained_words": [],
+    "tags": [],
+    "creator": None,
+    "nsfw": None,
+    "nsfw_level": None,
+    "download_count": None,
+    "thumbs_up_count": None,
+    "file_size_kb": None,
+    "sha256": None,
+}
+
+
 @patch('app.routers.find_model_files')
 def test_list_models(mock_find_model_files):
     mock_find_model_files.return_value = mock_models
@@ -39,6 +60,7 @@ def test_list_models(mock_find_model_files):
     assert response.status_code == 200
     assert response.json() == [
         {
+            **EXTRA_DEFAULTS,
             "model_id": 546949,
             "version_id": 1,
             "model_dir": "/path/to/models/model-mid_546949-vid_1.ckpt",
@@ -49,6 +71,7 @@ def test_list_models(mock_find_model_files):
             "created_at": "2023-01-01T00:00:00.000Z"
         },
         {
+            **EXTRA_DEFAULTS,
             "model_id": 123456,
             "version_id": 3,
             "model_dir": "/path/to/models/model-mid_123456.pt",
@@ -68,6 +91,7 @@ def test_get_model_success(mock_find_model_files):
     response = client.get("/models/546949")
     assert response.status_code == 200
     assert response.json() == [{
+        **EXTRA_DEFAULTS,
         "model_id": 546949,
         "version_id": 1,
         "model_dir": "/path/to/models/model-mid_546949-vid_1.ckpt",
@@ -104,6 +128,7 @@ def test_download_model_success(mock_civitdl):
     response = client.post("/models/546949/versions/1")
     assert response.status_code == 200
     assert response.json() == {
+        **EXTRA_DEFAULTS,
         "model_id": 546949,
         "version_id": 1,
         "model_dir": "folder1",
@@ -141,6 +166,7 @@ def test_remove_model_success(mock_delete_model_file):
     response = client.delete("/models/546949/versions/1")
     assert response.status_code == 200
     assert response.json() == {
+            **EXTRA_DEFAULTS,
             "model_id": 546949,
             "version_id": 1,
             "model_dir": "/path/to/models/model-mid_546949-vid_1.ckpt",
@@ -178,6 +204,7 @@ def test_remove_all_models_success(delete_model_files):
     response = client.delete("/models/")
     assert response.json() == [
         {
+            **EXTRA_DEFAULTS,
             "model_id": 546949,
             "version_id": 1,
             "model_dir": "/path/to/models/model-mid_546949-vid_1.ckpt",
