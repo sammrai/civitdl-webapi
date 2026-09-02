@@ -41,9 +41,15 @@ CIVITAI_TIMEOUT = (
 # and failing the second request for it with "it is stuck" would be a lie.
 DOWNLOAD_LOCK_TIMEOUT = float(os.getenv("DOWNLOAD_LOCK_TIMEOUT", "86400"))
 
+# civitdl names everything it writes `<name>-mid_<id>-vid_<id>.<ext>`, whatever
+# the extension. Only these three load in the WebUI this library feeds, so a
+# checkpoint published as a .gguf is downloaded in full and then thrown away --
+# say so, rather than reporting it as an authentication failure.
+MODEL_FILE_EXTENSIONS = ("safetensors", "ckpt", "pt")
 MODEL_FILE_PATTERN = re.compile(
-    r".*-mid_(\d+)(?:-vid_(\d+))?.*\.(safetensors|ckpt|pt)$"
+    r".*-mid_(\d+)(?:-vid_(\d+))?.*\.(" + "|".join(MODEL_FILE_EXTENSIONS) + r")$"
 )
+DOWNLOADED_FILE_PATTERN = re.compile(r".*-mid_(\d+)(?:-vid_(\d+))?.*\.\w+$")
 
 MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
     "lora": os.path.join(MODEL_ROOT_PATH, "models", "Lora"),
@@ -54,7 +60,6 @@ MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
     "textualinversion": os.path.join(MODEL_ROOT_PATH, "embeddings"),
 }
 
-DOWNLOAD_REFUSED = "Unable to download this model as it requires a valid API Key."
 RATE_LIMITED = "Civitai is rate limiting this client. Try again later."
 
 
@@ -180,6 +185,78 @@ def _discard_partial_download(model_dir: str) -> None:
     shutil.rmtree(model_dir, ignore_errors=True)
 
 
+def _unsupported_model_files(model_dir: str) -> List[str]:
+    """Model files civitdl downloaded that this API has no use for.
+
+    civitdl fetches whatever the version's primary file is, and a checkpoint
+    published as a .gguf arrives like any other. `find_model_files` then does
+    not match it, so a download that went perfectly counts as a failure -- and
+    used to be reported as a missing API key. Name the file instead.
+
+    Only the top level is read: the model file goes there, while the metadata
+    and previews civitdl also names `-mid_...` go under `extra_data`.
+    """
+    if not model_dir or not os.path.isdir(model_dir):
+        return []
+
+    try:
+        names = os.listdir(model_dir)
+    except OSError:
+        return []
+
+    return sorted(
+        name for name in names
+        if os.path.isfile(os.path.join(model_dir, name))
+        and DOWNLOADED_FILE_PATTERN.match(name)
+        and not MODEL_FILE_PATTERN.match(name)
+    )
+
+
+def _download_failure(
+    session: "_CivitaiSession",
+    unsupported: List[str],
+    model_id: int,
+    version_id: int
+) -> HTTPException:
+    """Explain an empty download instead of blaming the API key for it.
+
+    All four of these used to come back as 401 "requires a valid API Key" --
+    civitdl's line for any refusal, and this API's fallback for causes that had
+    nothing to do with authentication. A 7GB .gguf that downloaded perfectly
+    was reported that way, sending the caller after a token that was fine.
+    """
+    where = f"model {model_id} version {version_id}"
+
+    if session.refusal:
+        # Civitai's own words, kept by _CivitaiSession.
+        return HTTPException(status_code=401, detail=session.refusal)
+
+    if session.transport_error:
+        timed_out = "Timeout" in session.transport_error
+        return HTTPException(
+            status_code=504 if timed_out else 502,
+            detail=f"Download of {where} failed: {session.transport_error}"
+        )
+
+    if unsupported:
+        kinds = ", ".join(f".{ext}" for ext in MODEL_FILE_EXTENSIONS)
+        return HTTPException(
+            status_code=501,
+            detail=(
+                f"Downloaded {', '.join(unsupported)} for {where}, then "
+                f"discarded it: this API serves {kinds} only."
+            )
+        )
+
+    return HTTPException(
+        status_code=502,
+        detail=(
+            f"civitdl finished without writing a model file for {where}, and "
+            "reported no reason."
+        )
+    )
+
+
 def create_task_id() -> str:
     """Generate a unique task ID."""
     return str(uuid.uuid4())
@@ -245,11 +322,11 @@ def get_available_disk_space(path: str) -> int:
     return stat.f_bavail * stat.f_frsize
 
 
-def _primary_file_size(metadata: Dict[str, Any]) -> int:
-    """Size in bytes of the file civitdl will download for this version.
+def _primary_file(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """The one file civitdl will download for this version.
 
     The requested version is not always the first entry of modelVersions, so
-    reading the files off modelVersions[0] sized whichever version Civitai
+    reading the files off modelVersions[0] described whichever version Civitai
     happened to list first.
     """
     files = (metadata.get("version_dict") or {}).get("files") or []
@@ -264,9 +341,38 @@ def _primary_file_size(metadata: Dict[str, Any]) -> int:
 
     for file in files:
         if file.get("primary", False):
-            return int(file.get("sizeKB", 0) * 1024)
+            return file
 
-    return int(files[0].get("sizeKB", 0) * 1024) if files else 0
+    return files[0] if files else {}
+
+
+def _primary_file_size(metadata: Dict[str, Any]) -> int:
+    """Size in bytes of the file civitdl will download for this version."""
+    return int(_primary_file(metadata).get("sizeKB", 0) * 1024)
+
+
+def _reject_unsupported_file(metadata: Dict[str, Any]) -> None:
+    """Refuse a version whose file this library cannot hold, before fetching it.
+
+    Civitai names the file in the metadata civitdl already reads to find the
+    download URL, so a .gguf checkpoint is knowable up front. Finding out
+    afterwards cost a 7GB download that `_discard_partial_download` then
+    deleted, eleven minutes to report a failure the first request could have.
+    """
+    name = _primary_file(metadata).get("name") or ""
+    if not name or name.lower().endswith(tuple(
+            f".{ext}" for ext in MODEL_FILE_EXTENSIONS)):
+        return
+
+    kinds = ", ".join(f".{ext}" for ext in MODEL_FILE_EXTENSIONS)
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            f"Model {metadata.get('model_id')} version "
+            f"{metadata.get('version_id')} is published as {name}, which this "
+            f"API cannot serve: it handles {kinds} only. Nothing was downloaded."
+        )
+    )
 
 
 def get_model_file_size(model_id: int, version_id: Optional[int] = None) -> int:
@@ -586,6 +692,7 @@ def _civitdl(
 
     try:
         metadata = get_safe_metadata(model_id_str)
+        _reject_unsupported_file(metadata)
         model_type = metadata.get("model_dict", {}).get("type", "").lower()
         output_dir = MODEL_TYPE_TO_FOLDER.get(model_type)
 
@@ -625,14 +732,14 @@ def _civitdl(
                 print(f"Model {model_id_str} has been successfully downloaded to {output_dir}.")
 
             downloaded = find_model_files(resolved_model_id, resolved_version_id)
-            _discard_partial_download(
-                _model_dir(metadata, output_dir or MODEL_ROOT_PATH))
+            model_dir = _model_dir(metadata, output_dir or MODEL_ROOT_PATH)
+            # Read before the discard: it deletes the very file to report on.
+            unsupported = _unsupported_model_files(model_dir)
+            _discard_partial_download(model_dir)
 
         if len(downloaded) == 0:
-            raise HTTPException(
-                status_code=401,
-                detail=session.refusal or session.transport_error or DOWNLOAD_REFUSED
-            )
+            raise _download_failure(
+                session, unsupported, resolved_model_id, resolved_version_id)
         if len(downloaded) > 1:
             raise HTTPException(status_code=500, detail="Unexpected error occurred.")
         return downloaded[0]
@@ -662,6 +769,7 @@ def _civitdl_async_worker(
     """
     download_complete = threading.Event()
     download_error = [None]  # Use list to allow modification in nested function
+    unsupported = []         # ... and to carry the leftovers back out of it
     session = _CivitaiSession()
 
     def do_download():
@@ -711,8 +819,11 @@ def _civitdl_async_worker(
                     # No find_model_files() guard here: it walks the whole
                     # library, and _discard_partial_download already keeps a
                     # directory that has a model file in it.
-                    _discard_partial_download(
-                        _model_dir(metadata, output_dir or MODEL_ROOT_PATH))
+                    model_dir = _model_dir(
+                        metadata, output_dir or MODEL_ROOT_PATH)
+                    # Read before the discard, which deletes what it names.
+                    unsupported.extend(_unsupported_model_files(model_dir))
+                    _discard_partial_download(model_dir)
         except Exception as e:
             download_error[0] = e
         finally:
@@ -754,6 +865,8 @@ def _civitdl_async_worker(
             model_name=model_dict.get("name") or None,
             model_type=model_type or None
         )
+        # After update_task, so a task refused here still says which model it was.
+        _reject_unsupported_file(metadata)
 
         # Get expected file size from metadata, for the version asked for
         expected_size = _primary_file_size(metadata)
@@ -792,7 +905,9 @@ def _civitdl_async_worker(
                 task_id,
                 status="failed",
                 progress=0,
-                error=session.refusal or session.transport_error or DOWNLOAD_REFUSED
+                error=_download_failure(
+                    session, unsupported,
+                    resolved_model_id, resolved_version_id).detail
             )
             return
 
