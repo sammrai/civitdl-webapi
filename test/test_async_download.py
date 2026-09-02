@@ -135,7 +135,8 @@ def test_a_download_that_writes_nothing_fails_with_a_reason(client):
 
     assert task["status"] == "failed"
     assert task["result"] is None
-    assert task["error"] == utils.DOWNLOAD_REFUSED
+    assert "without writing a model file" in task["error"]
+    assert "API Key" not in task["error"]
 
 
 def test_polling_an_unknown_task_is_404(client):

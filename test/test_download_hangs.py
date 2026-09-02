@@ -71,7 +71,7 @@ def test_a_download_that_timed_out_does_not_blame_the_api_key(civitdl):
 
     task = utils.get_task(task_id)
     assert task["status"] == "failed"
-    assert task["error"] != utils.DOWNLOAD_REFUSED
+    assert "API Key" not in task["error"]
     assert "ReadTimeout" in task["error"]
 
 
