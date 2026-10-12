@@ -233,3 +233,65 @@ def test_a_download_that_wrote_nothing_says_that(civitdl):
     assert excinfo.value.status_code == 502
     assert "without writing a model file" in excinfo.value.detail
     assert "API Key" not in excinfo.value.detail
+
+
+# --- a "/" in the model name --------------------------------------------------
+
+SLASHED = {
+    "model_id": "2742708",
+    "version_id": "3084680",
+    "model_dict": {"id": 2742708, "name": "Pen / Pencil", "type": "LORA"},
+    "version_dict": {"id": 3084680, "downloadUrl": DOWNLOAD_URL},
+}
+
+
+def wrote_below_the_model_dir(tmp_path):
+    """What civitdl does with "Pen / Pencil": the "/" becomes a directory."""
+    def download(*args, **kwargs):
+        model_dir = tmp_path / "Pen & Pencil-mid_2742708-vid_3084680"
+        extra_data = model_dir / "extra_data-vid_3084680"
+        extra_data.mkdir(parents=True)
+        (extra_data / "model_dict-mid_2742708-vid_3084680.json").write_text(
+            '{"type": "LORA", "name": "Pen / Pencil"}')
+        (model_dir / "Pen ").mkdir()
+        for ext in ("safetensors", "csv"):
+            (model_dir / "Pen " / f" Pencil--e10-mid_2742708-vid_3084680.{ext}").write_bytes(b"w")
+    return download
+
+
+def test_a_slash_in_the_model_name_does_not_nest_the_file(civitdl, tmp_path):
+    # The nested file was listed as model_type "unknown" with no name, which
+    # stopped a consumer's whole sync.
+    civitdl.side_effect = wrote_below_the_model_dir(tmp_path)
+
+    with patch.object(utils, "MODEL_ROOT_PATH", str(tmp_path)), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"lora": str(tmp_path)}), \
+            patch.object(utils, "get_safe_metadata", return_value=SLASHED), \
+            patch("requests.Session.request", return_value=MagicMock(status_code=200)):
+        model = utils._civitdl(2742708, 3084680, "key")
+
+    model_dir = tmp_path / "Pen & Pencil-mid_2742708-vid_3084680"
+    assert model.model_type.value == "lora"
+    assert model.model_dir == str(model_dir)
+    assert model.filename == "Pen & Pencil--e10-mid_2742708-vid_3084680.safetensors"
+    assert sorted(path.name for path in model_dir.iterdir()) == [
+        "Pen & Pencil--e10-mid_2742708-vid_3084680.csv",
+        "Pen & Pencil--e10-mid_2742708-vid_3084680.safetensors",
+        "extra_data-vid_3084680",
+    ]
+
+
+def test_the_async_download_does_not_nest_the_file_either(civitdl, tmp_path):
+    civitdl.side_effect = wrote_below_the_model_dir(tmp_path)
+
+    with patch.object(utils, "MODEL_ROOT_PATH", str(tmp_path)), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"lora": str(tmp_path)}), \
+            patch.object(utils, "get_safe_metadata", return_value=SLASHED), \
+            patch("requests.Session.request", return_value=MagicMock(status_code=200)):
+        task_id = utils.create_task(2742708, 3084680)
+        utils._civitdl_async_worker(task_id, 2742708, 3084680, "key")
+
+    task = utils.get_task(task_id)
+    assert task["status"] == "finished", task["error"]
+    assert task["result"].model_type.value == "lora"
+    assert task["result"].filename == "Pen & Pencil--e10-mid_2742708-vid_3084680.safetensors"

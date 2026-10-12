@@ -185,6 +185,31 @@ def _discard_partial_download(model_dir: str) -> None:
     shutil.rmtree(model_dir, ignore_errors=True)
 
 
+def _flatten_model_dir(model_dir: str) -> None:
+    """Move files civitdl wrote below the model directory back up into it.
+
+    civitdl builds the file name from the model's raw name, so a model called
+    "Pen / Pencil" gets its file written to `<model_dir>/Pen / Pencil--...`:
+    the "/" becomes a directory. `find_model_files` then looks for `extra_data`
+    next to the file, does not find it, and lists the model as
+    `model_type="unknown"` with no name. The sorter, which names `model_dir`,
+    replaces the "/" with "&" -- do the same to the file name.
+    """
+    if not model_dir or not os.path.isdir(model_dir):
+        return
+
+    for root, _, files in os.walk(model_dir, topdown=False):
+        relative = os.path.relpath(root, model_dir)
+        if relative == "." or ".tmp" in root or relative.startswith("extra_data-vid_"):
+            continue
+        for file in files:
+            if DOWNLOADED_FILE_PATTERN.match(file):
+                flat = os.path.join(relative, file).replace(os.sep, "&")
+                os.replace(os.path.join(root, file), os.path.join(model_dir, flat))
+        if not os.listdir(root):
+            os.rmdir(root)
+
+
 def _unsupported_model_files(model_dir: str) -> List[str]:
     """Model files civitdl downloaded that this API has no use for.
 
@@ -731,8 +756,9 @@ def _civitdl(
                 )
                 print(f"Model {model_id_str} has been successfully downloaded to {output_dir}.")
 
-            downloaded = find_model_files(resolved_model_id, resolved_version_id)
             model_dir = _model_dir(metadata, output_dir or MODEL_ROOT_PATH)
+            _flatten_model_dir(model_dir)
+            downloaded = find_model_files(resolved_model_id, resolved_version_id)
             # Read before the discard: it deletes the very file to report on.
             unsupported = _unsupported_model_files(model_dir)
             _discard_partial_download(model_dir)
@@ -821,6 +847,7 @@ def _civitdl_async_worker(
                     # directory that has a model file in it.
                     model_dir = _model_dir(
                         metadata, output_dir or MODEL_ROOT_PATH)
+                    _flatten_model_dir(model_dir)
                     # Read before the discard, which deletes what it names.
                     unsupported.extend(_unsupported_model_files(model_dir))
                     _discard_partial_download(model_dir)
