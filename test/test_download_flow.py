@@ -295,3 +295,170 @@ def test_the_async_download_does_not_nest_the_file_either(civitdl, tmp_path):
     assert task["status"] == "finished", task["error"]
     assert task["result"].model_type.value == "lora"
     assert task["result"].filename == "Pen & Pencil--e10-mid_2742708-vid_3084680.safetensors"
+
+
+# --- a checkpoint version whose primary file is a LoRA ----------------------
+
+def safetensors(*keys):
+    """The header of a .safetensors file holding tensors named `keys`."""
+    import json, struct
+    header = json.dumps({
+        "__metadata__": {"ss_network_module": "networks.lora"},
+        **{key: {"dtype": "F16", "shape": [1], "data_offsets": [0, 2]} for key in keys},
+    }).encode()
+    return struct.pack("<Q", len(header)) + header + b"\0\0"
+
+
+LORA = safetensors("lora_unet_layers_0.lora_down.weight", "lora_unet_layers_0.lora_up.weight", "lora_unet_layers_0.alpha")
+CHECKPOINT = safetensors("model.diffusion_model.layers.0.weight", "model.diffusion_model.layers.0.bias")
+
+DARKBEAST = {
+    "model_id": "2242173",
+    "version_id": "2682031",
+    "model_dict": {"id": 2242173, "name": "DarkBeast", "type": "Checkpoint"},
+    "version_dict": {
+        "id": 2682031,
+        "downloadUrl": "https://civitai.com/api/download/models/2682031",
+        "files": [
+            {"id": 2568709, "name": "DarkBeastZ-NVFP4.safetensors", "type": "Model",
+             "primary": False, "sizeKB": 7053413, "metadata": {"fp": "nf4"}},
+            {"id": 2568733, "name": "DarkBeastZ-BF16.safetensors", "type": "Model",
+             "primary": False, "sizeKB": 12021365, "metadata": {"fp": "bf16"}},
+            {"id": 2568710, "name": "DarkBeastZ-fp8.safetensors", "type": "Model",
+             "primary": False, "sizeKB": 7075498, "metadata": {"fp": "fp8"}},
+            {"id": 2568670, "name": "trainingData.zip", "type": "Training Data",
+             "primary": False, "sizeKB": 10, "metadata": {}},
+            {"id": 2579659, "name": "DarkBeast5_extracted_lora_r256.safetensors", "type": "Model",
+             "primary": True, "sizeKB": 1094441, "metadata": {"fp": "fp16"}},
+        ],
+    },
+}
+
+
+def civitai_serving(tmp_path, bodies):
+    """Download the way civitdl does: whichever file the session asks for."""
+    model_dir = tmp_path / "DarkBeast-mid_2242173-vid_2682031"
+
+    def download(*args, batchOptions, **kwargs):
+        file_id = batchOptions.session.file_id
+        stem, body = bodies[file_id]
+        extra_data = model_dir / "extra_data-vid_2682031"
+        extra_data.mkdir(parents=True, exist_ok=True)
+        (extra_data / "model_dict-mid_2242173-vid_2682031.json").write_text('{"type": "Checkpoint"}')
+        (model_dir / f"{stem}-mid_2242173-vid_2682031.safetensors").write_bytes(body)
+        (model_dir / f"{stem}-mid_2242173-vid_2682031.csv").write_text("hash")
+    return model_dir, download
+
+
+def checkpoint_folder(tmp_path):
+    return patch.multiple(
+        utils, MODEL_ROOT_PATH=str(tmp_path), get_safe_metadata=MagicMock(return_value=DARKBEAST))
+
+
+def test_a_lora_shipped_as_a_checkpoint_is_replaced_by_the_checkpoint(civitdl, tmp_path):
+    model_dir, civitdl.side_effect = civitai_serving(tmp_path, {
+        None: ("DarkBeast5_extracted_lora_r256", LORA),
+        2568733: ("DarkBeastZ-BF16", CHECKPOINT),
+    })
+
+    with checkpoint_folder(tmp_path), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"checkpoint": str(tmp_path)}), \
+            patch("requests.Session.request", return_value=MagicMock(status_code=200)):
+        model = utils._civitdl(2242173, 2682031, "key")
+
+    assert model.filename == "DarkBeastZ-BF16-mid_2242173-vid_2682031.safetensors"
+    assert sorted(path.name for path in model_dir.iterdir()) == [
+        "DarkBeastZ-BF16-mid_2242173-vid_2682031.csv",
+        "DarkBeastZ-BF16-mid_2242173-vid_2682031.safetensors",
+        "extra_data-vid_2682031",
+    ]
+
+
+def test_the_async_download_replaces_it_too(civitdl, tmp_path):
+    _, civitdl.side_effect = civitai_serving(tmp_path, {
+        None: ("DarkBeast5_extracted_lora_r256", LORA),
+        2568733: ("DarkBeastZ-BF16", CHECKPOINT),
+    })
+
+    with checkpoint_folder(tmp_path), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"checkpoint": str(tmp_path)}), \
+            patch("requests.Session.request", return_value=MagicMock(status_code=200)):
+        task_id = utils.create_task(2242173, 2682031)
+        utils._civitdl_async_worker(task_id, 2242173, 2682031, "key")
+
+    task = utils.get_task(task_id)
+    assert task["status"] == "finished", task["error"]
+    assert task["result"].filename == "DarkBeastZ-BF16-mid_2242173-vid_2682031.safetensors"
+
+
+def test_a_checkpoint_with_nothing_but_loras_says_so(civitdl, tmp_path):
+    lora = ("lora", LORA)
+    _, civitdl.side_effect = civitai_serving(
+        tmp_path, {None: lora, 2568733: lora, 2568710: lora, 2568709: lora})
+
+    with checkpoint_folder(tmp_path), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"checkpoint": str(tmp_path)}), \
+            patch("requests.Session.request", return_value=MagicMock(status_code=200)):
+        with pytest.raises(HTTPException) as excinfo:
+            utils._civitdl(2242173, 2682031, "key")
+
+    assert excinfo.value.status_code == 422
+    assert "LoRA" in excinfo.value.detail
+    assert not (tmp_path / "DarkBeast-mid_2242173-vid_2682031").exists()
+
+
+def test_a_real_checkpoint_is_downloaded_once(civitdl, tmp_path):
+    _, civitdl.side_effect = civitai_serving(tmp_path, {None: ("DarkBeast", CHECKPOINT)})
+
+    with checkpoint_folder(tmp_path), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"checkpoint": str(tmp_path)}), \
+            patch("requests.Session.request", return_value=MagicMock(status_code=200)):
+        utils._civitdl(2242173, 2682031, "key")
+
+    assert civitdl.call_count == 1
+
+
+def test_the_session_asks_civitai_for_the_chosen_file():
+    session = utils._CivitaiSession()
+    session.file_id = 2568733
+    with patch("requests.Session.request", return_value=MagicMock(status_code=200)) as request:
+        session.get("https://civitai.com/api/download/models/2682031")
+        session.get("https://civitai.com/api/v1/model-versions/2682031")
+
+    assert request.call_args_list[0].args[1] == "https://civitai.com/api/download/models/2682031?fileId=2568733"
+    assert request.call_args_list[1].args[1] == "https://civitai.com/api/v1/model-versions/2682031"
+
+
+def test_a_lora_already_on_disk_is_replaced_without_downloading_it_again(civitdl, tmp_path):
+    # Downloaded before the check existed: the next request must not answer
+    # "already there" with it.
+    model_dir, civitdl.side_effect = civitai_serving(tmp_path, {
+        2568733: ("DarkBeastZ-BF16", CHECKPOINT),
+    })
+    (model_dir / "extra_data-vid_2682031").mkdir(parents=True)
+    (model_dir / "extra_data-vid_2682031" / "model_dict-mid_2242173-vid_2682031.json").write_text(
+        '{"type": "Checkpoint"}')
+    (model_dir / "DarkBeast5_extracted_lora_r256-mid_2242173-vid_2682031.safetensors").write_bytes(LORA)
+
+    with checkpoint_folder(tmp_path), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"checkpoint": str(tmp_path)}), \
+            patch("requests.Session.request", return_value=MagicMock(status_code=200)):
+        model = utils._civitdl(2242173, 2682031, "key")
+
+    assert civitdl.call_count == 1  # the checkpoint only, not the LoRA again
+    assert model.filename == "DarkBeastZ-BF16-mid_2242173-vid_2682031.safetensors"
+    assert not (model_dir / "DarkBeast5_extracted_lora_r256-mid_2242173-vid_2682031.safetensors").exists()
+
+
+def test_a_lora_version_keeps_its_lora(civitdl, tmp_path):
+    lora_version = {**DARKBEAST, "model_dict": {**DARKBEAST["model_dict"], "type": "LORA"}}
+    _, civitdl.side_effect = civitai_serving(tmp_path, {None: ("DarkBeast", LORA)})
+
+    with patch.multiple(utils, MODEL_ROOT_PATH=str(tmp_path),
+                        get_safe_metadata=MagicMock(return_value=lora_version)), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"lora": str(tmp_path)}), \
+            patch("requests.Session.request", return_value=MagicMock(status_code=200)):
+        model = utils._civitdl(2242173, 2682031, "key")
+
+    assert civitdl.call_count == 1
+    assert model.filename == "DarkBeast-mid_2242173-vid_2682031.safetensors"

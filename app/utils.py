@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import shutil
+import struct
 import requests
 import uuid
 import threading
@@ -11,7 +12,7 @@ from contextlib import contextmanager
 from typing import Callable, List, Dict, Any, Optional
 from fastapi import HTTPException
 
-from app.models import ModelInfo
+from app.models import ModelInfo, ModelType
 from app.sorter import sort_model
 from helpers.core.utils import APIException
 from helpers.sourcemanager import SourceManager
@@ -51,6 +52,11 @@ MODEL_FILE_PATTERN = re.compile(
 )
 DOWNLOADED_FILE_PATTERN = re.compile(r".*-mid_(\d+)(?:-vid_(\d+))?.*\.\w+$")
 
+# The order to try a checkpoint's other files in, when the primary one turns out
+# to be a LoRA. Full precision first: a reference ZImageTurbo checkpoint ships a
+# single bf16 file, and that is the layout the WebUI loads like any other.
+CHECKPOINT_PRECISIONS = ("bf16", "fp16", "fp32", "fp8")
+
 MODEL_TYPE_TO_FOLDER: Dict[str, str] = {
     "lora": os.path.join(MODEL_ROOT_PATH, "models", "Lora"),
     "locon": os.path.join(MODEL_ROOT_PATH, "models", "Lora"),
@@ -75,12 +81,19 @@ class _CivitaiSession(requests.Session):
 
     refusal = None
     transport_error = None
+    # Download this file of the version instead of its primary one. civitdl
+    # only knows the version's downloadUrl, which always serves the primary.
+    file_id = None
+    # Names of the files that turned out to be LoRAs in a checkpoint version.
+    loras = ()
 
     def request(self, method, url, **kwargs):
         # civitdl calls session.get() without a timeout, both for the metadata
         # and for the streamed model body, so supply one here.
         if kwargs.get("timeout") is None:
             kwargs["timeout"] = CIVITAI_TIMEOUT
+        if self.file_id and "/api/download/models/" in str(url) and "fileId=" not in str(url):
+            url = f"{url}{'&' if '?' in str(url) else '?'}fileId={self.file_id}"
         try:
             response = super().request(method, url, **kwargs)
         except requests.RequestException as error:
@@ -263,6 +276,15 @@ def _download_failure(
             detail=f"Download of {where} failed: {session.transport_error}"
         )
 
+    if session.loras:
+        return HTTPException(
+            status_code=422,
+            detail=(
+                f"{where} is a checkpoint, but each of its model files is a "
+                f"LoRA ({', '.join(session.loras)}). Nothing was kept."
+            )
+        )
+
     if unsupported:
         kinds = ", ".join(f".{ext}" for ext in MODEL_FILE_EXTENSIONS)
         return HTTPException(
@@ -347,8 +369,8 @@ def get_available_disk_space(path: str) -> int:
     return stat.f_bavail * stat.f_frsize
 
 
-def _primary_file(metadata: Dict[str, Any]) -> Dict[str, Any]:
-    """The one file civitdl will download for this version.
+def _version_files(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Every file Civitai lists for this version.
 
     The requested version is not always the first entry of modelVersions, so
     reading the files off modelVersions[0] described whichever version Civitai
@@ -364,6 +386,13 @@ def _primary_file(metadata: Dict[str, Any]) -> Dict[str, Any]:
                 files = version.get("files") or []
                 break
 
+    return files
+
+
+def _primary_file(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """The one file civitdl will download for this version."""
+    files = _version_files(metadata)
+
     for file in files:
         if file.get("primary", False):
             return file
@@ -371,9 +400,123 @@ def _primary_file(metadata: Dict[str, Any]) -> Dict[str, Any]:
     return files[0] if files else {}
 
 
-def _primary_file_size(metadata: Dict[str, Any]) -> int:
+def _primary_file_size(metadata: Dict[str, Any], file_id: Optional[int] = None) -> int:
     """Size in bytes of the file civitdl will download for this version."""
-    return int(_primary_file(metadata).get("sizeKB", 0) * 1024)
+    file = next(
+        (f for f in _version_files(metadata) if file_id and f.get("id") == file_id),
+        None,
+    ) or _primary_file(metadata)
+    return int(file.get("sizeKB", 0) * 1024)
+
+
+def _checkpoint_alternatives(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The files to try, in order, when a checkpoint's primary file is a LoRA."""
+    if (metadata.get("model_dict") or {}).get("type", "").lower() != "checkpoint":
+        return []
+
+    def precision(file):
+        fp = ((file.get("metadata") or {}).get("fp") or "").lower()
+        return CHECKPOINT_PRECISIONS.index(fp) if fp in CHECKPOINT_PRECISIONS else len(CHECKPOINT_PRECISIONS)
+
+    return sorted(
+        (
+            f for f in _version_files(metadata)
+            if not f.get("primary")
+            and f.get("type") in ("Model", "Diffusion Model")
+            and (f.get("name") or "").lower().endswith(tuple(f".{ext}" for ext in MODEL_FILE_EXTENSIONS))
+        ),
+        key=precision,
+    )
+
+
+def _is_lora(path: str) -> bool:
+    """Whether a .safetensors file holds LoRA weights rather than a model.
+
+    Civitai's labels cannot tell: a checkpoint version has shipped an extracted
+    LoRA as its primary file, tagged fp16 and pruned like a real checkpoint. Its
+    tensor names can -- every one of a LoRA's is `lora_*`, `*.lora_down.*` and
+    the like, while a checkpoint has none.
+    """
+    if not path.endswith(".safetensors"):
+        return False
+    try:
+        with open(path, "rb") as f:
+            (length,) = struct.unpack("<Q", f.read(8))
+            header = json.loads(f.read(length))
+    except (OSError, ValueError, struct.error, MemoryError):
+        return False
+
+    keys = [key for key in header if key != "__metadata__"]
+    return bool(keys) and all("lora" in key.lower() for key in keys)
+
+
+def _usable_model_files(model_id: int, version_id: Optional[int]) -> List[ModelInfo]:
+    """`find_model_files`, less a checkpoint that is really a LoRA.
+
+    Such a file was downloaded before `_download_model_file` checked for it.
+    Leaving it out makes the next request for the version download the
+    checkpoint in its place instead of answering that it is already there.
+    """
+    return [
+        model for model in find_model_files(model_id, version_id)
+        if not (model.model_type == ModelType.CHECKPOINT
+                and _is_lora(os.path.join(model.model_dir, model.filename)))
+    ]
+
+
+def _download_model_file(
+    source_strings, root_dir, args, session: "_CivitaiSession",
+    metadata: Dict[str, Any], model_dir: str
+) -> None:
+    """Run civitdl, then make sure a checkpoint version did not get a LoRA.
+
+    civitdl downloads the version's primary file whatever it is. When that file
+    of a checkpoint is a LoRA, the WebUI fails every generation with "Failed to
+    recognize model type!", so delete it and download the version's other model
+    files in turn until one is not. A LoRA already sitting in `model_dir` from
+    before this check existed goes the same way, without downloading it again.
+    """
+    is_checkpoint = (metadata.get("model_dict") or {}).get("type", "").lower() == "checkpoint"
+    alternatives = iter(_checkpoint_alternatives(metadata))
+    loras = []
+    downloaded = False
+    while True:
+        found = [
+            name for name in (os.listdir(model_dir) if os.path.isdir(model_dir) else [])
+            if MODEL_FILE_PATTERN.match(name)
+        ]
+        if found and not (is_checkpoint and all(
+                _is_lora(os.path.join(model_dir, name)) for name in found)):
+            return
+        if not found:
+            if downloaded:
+                return
+            batch_options = BatchOptions(**args)
+            batch_options.session = session
+            batch_download(
+                source_strings=source_strings,
+                rootdir=root_dir if root_dir != "None" else None,
+                batchOptions=batch_options
+            )
+            _flatten_model_dir(model_dir)
+            downloaded = True
+            continue
+
+        loras.extend(found)
+        session.loras = tuple(loras)
+        # The model file and the hash civitdl wrote next to it. The metadata in
+        # extra_data stays: it describes the version, not the file.
+        for name in os.listdir(model_dir):
+            path = os.path.join(model_dir, name)
+            if os.path.isfile(path) and DOWNLOADED_FILE_PATTERN.match(name):
+                os.remove(path)
+
+        alternative = next(alternatives, None)
+        if alternative is None:
+            return
+        print(f"{', '.join(found)} is a LoRA, not a checkpoint; downloading {alternative.get('name')} instead.")
+        session.file_id = alternative.get("id")
+        downloaded = False
 
 
 def _reject_unsupported_file(metadata: Dict[str, Any]) -> None:
@@ -417,7 +560,7 @@ def check_disk_space(model_id: int, version_id: Optional[int] = None) -> None:
     """
     try:
         # Already downloaded models don't require additional space, skip the check
-        if find_model_files(model_id, version_id):
+        if _usable_model_files(model_id, version_id):
             return
 
         file_size = get_model_file_size(model_id, version_id)
@@ -521,7 +664,9 @@ def get_safe_metadata(model_str: str) -> Dict[str, Any]:
     return json.loads(json.dumps(metadata.__dict__, default=_serialize))
 
 
-def _read_extra_data(extra_data_path: str, version_id: Optional[int]) -> dict:
+def _read_extra_data(
+    extra_data_path: str, version_id: Optional[int], filename: str = ""
+) -> dict:
     """Read the metadata civitdl saved next to a model file.
 
     Everything a `ModelInfo` knows beyond its path comes from this one JSON, so
@@ -570,10 +715,14 @@ def _read_extra_data(extra_data_path: str, version_id: Optional[int]) -> dict:
     extra["download_count"] = stats.get("downloadCount")
     extra["thumbs_up_count"] = stats.get("thumbsUpCount")
 
-    # civitdl only ever downloads the primary file, so that is the one whose
-    # size and hash describe what is actually on disk.
+    # The file on disk is named after the version file it came from. That is
+    # the primary one, unless a checkpoint's primary file was a LoRA and
+    # _download_model_file fetched another.
     files = version.get("files") or []
-    primary = next((f for f in files if f.get("primary")), None)
+    stem = re.sub(r"-mid_\d+(?:-vid_\d+)?(?=\.\w+$)", "", filename)
+    primary = next((f for f in files if filename and f.get("name") == stem), None)
+    if primary is None:
+        primary = next((f for f in files if f.get("primary")), None)
     if primary is None and files:
         primary = files[0]
     if primary:
@@ -630,7 +779,7 @@ def find_model_files(
                     f"model_dict-mid_{found_model_id}-vid_{found_version_id}.json"
                 )
 
-                extra = _read_extra_data(extra_data_path, found_version_id)
+                extra = _read_extra_data(extra_data_path, found_version_id, file)
 
                 found_models.append(
                     ModelInfo(
@@ -706,7 +855,7 @@ def _civitdl(
     downloaded_model = _civitdl(model_id=12345, version_id=1, api_key="your_api_key")
     ```
     """
-    existing_models = find_model_files(model_id, version_id)
+    existing_models = _usable_model_files(model_id, version_id)
     if len(existing_models) >= 1:
         return existing_models[0]
 
@@ -745,19 +894,12 @@ def _civitdl(
         with _hold_download_lock(resolved_model_id, resolved_version_id):
             # A concurrent request for the same version may have finished it
             # while this one waited for the lock.
-            if not find_model_files(resolved_model_id, resolved_version_id):
-                batch_options = BatchOptions(**args)
-                batch_options.session = session
-
-                batch_download(
-                    source_strings=source_strings,
-                    rootdir=root_dir if root_dir != "None" else None,
-                    batchOptions=batch_options
-                )
+            model_dir = _model_dir(metadata, output_dir or MODEL_ROOT_PATH)
+            if not _usable_model_files(resolved_model_id, resolved_version_id):
+                _download_model_file(
+                    source_strings, root_dir, args, session, metadata, model_dir)
                 print(f"Model {model_id_str} has been successfully downloaded to {output_dir}.")
 
-            model_dir = _model_dir(metadata, output_dir or MODEL_ROOT_PATH)
-            _flatten_model_dir(model_dir)
             downloaded = find_model_files(resolved_model_id, resolved_version_id)
             # Read before the discard: it deletes the very file to report on.
             unsupported = _unsupported_model_files(model_dir)
@@ -829,24 +971,17 @@ def _civitdl_async_worker(
             with _hold_download_lock(resolved_model_id, resolved_version_id):
                 # A concurrent request for the same version may have finished
                 # it while this one waited for the lock.
-                if find_model_files(resolved_model_id, resolved_version_id):
+                if _usable_model_files(resolved_model_id, resolved_version_id):
                     return
 
-                batch_options = BatchOptions(**args)
-                batch_options.session = session
-
+                model_dir = _model_dir(metadata, output_dir or MODEL_ROOT_PATH)
                 try:
-                    batch_download(
-                        source_strings=source_strings,
-                        rootdir=root_dir if root_dir != "None" else None,
-                        batchOptions=batch_options
-                    )
+                    _download_model_file(
+                        source_strings, root_dir, args, session, metadata, model_dir)
                 finally:
                     # No find_model_files() guard here: it walks the whole
                     # library, and _discard_partial_download already keeps a
                     # directory that has a model file in it.
-                    model_dir = _model_dir(
-                        metadata, output_dir or MODEL_ROOT_PATH)
                     _flatten_model_dir(model_dir)
                     # Read before the discard, which deletes what it names.
                     unsupported.extend(_unsupported_model_files(model_dir))
@@ -859,7 +994,7 @@ def _civitdl_async_worker(
     try:
         # Check if model already exists
         update_task(task_id, status="downloading", progress=1)
-        existing_models = find_model_files(model_id, version_id)
+        existing_models = _usable_model_files(model_id, version_id)
         if len(existing_models) >= 1:
             existing = existing_models[0]
             update_task(
@@ -906,6 +1041,8 @@ def _civitdl_async_worker(
 
         # Monitor progress by checking .tmp file sizes
         while not download_complete.is_set():
+            # A checkpoint whose primary file was a LoRA is downloading another.
+            expected_size = _primary_file_size(metadata, session.file_id)
             if expected_size > 0:
                 current_size = _get_tmp_file_size(_model_dir(metadata, output_dir))
                 progress = min(5 + int((current_size / expected_size) * 90), 95)
