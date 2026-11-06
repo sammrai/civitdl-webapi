@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -86,6 +87,8 @@ class _CivitaiSession(requests.Session):
     file_id = None
     # Names of the files that turned out to be LoRAs in a checkpoint version.
     loras = ()
+    # Why the downloaded file was not the one Civitai lists, if it was not.
+    mismatch = None
 
     def request(self, method, url, **kwargs):
         # civitdl calls session.get() without a timeout, both for the metadata
@@ -276,6 +279,12 @@ def _download_failure(
             detail=f"Download of {where} failed: {session.transport_error}"
         )
 
+    if session.mismatch:
+        return HTTPException(
+            status_code=502,
+            detail=f"Download of {where} was discarded: {session.mismatch}"
+        )
+
     if session.loras:
         return HTTPException(
             status_code=422,
@@ -450,6 +459,59 @@ def _is_lora(path: str) -> bool:
     return bool(keys) and all("lora" in key.lower() for key in keys)
 
 
+def _file_entry_for(files: List[Dict[str, Any]], path: str) -> Optional[Dict[str, Any]]:
+    """The version file a file on disk was downloaded from, told by its size.
+
+    Not by its name: civitdl names the file after Content-Disposition, which is
+    sometimes a name Civitai makes up rather than the file's own. Nor is it
+    always the primary file -- see `_download_model_file`. `sizeKB` is exact to
+    the byte for every file seen so far; a truncated download matches nothing.
+    """
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return None
+    return next(
+        (f for f in files if abs((f.get("sizeKB") or 0) * 1024 - size) < 1),
+        None,
+    )
+
+
+def _sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_download(metadata: Dict[str, Any], path: str) -> Optional[str]:
+    """Why the file civitdl wrote is not the file Civitai lists, if it is not.
+
+    civitdl's strict mode never checks a download: it only uses the hash to
+    decide whether to reuse a file it already has, and it never finds the hash
+    anyway, because it looks for a file whose downloadUrl is the version's and
+    Civitai now appends `?fileId=` to every file's. A download cut short or
+    corrupted in transit was kept as if it were the model.
+    """
+    files = _version_files(metadata)
+    if not any(f.get("sizeKB") for f in files):
+        return None  # nothing to compare against
+    entry = _file_entry_for(files, path)
+    if entry is None:
+        return (
+            f"{os.path.basename(path)} is {os.path.getsize(path)} bytes, which "
+            "is the size of none of the version's files on Civitai."
+        )
+    expected = ((entry.get("hashes") or {}).get("SHA256") or "").lower()
+    if expected and _sha256(path) != expected:
+        return (
+            f"{os.path.basename(path)} does not match the SHA256 Civitai lists "
+            f"for {entry.get('name')}."
+        )
+    return None
+
+
 def _usable_model_files(model_id: int, version_id: Optional[int]) -> List[ModelInfo]:
     """`find_model_files`, less a checkpoint that is really a LoRA.
 
@@ -462,6 +524,17 @@ def _usable_model_files(model_id: int, version_id: Optional[int]) -> List[ModelI
         if not (model.model_type == ModelType.CHECKPOINT
                 and _is_lora(os.path.join(model.model_dir, model.filename)))
     ]
+
+
+def _remove_downloaded_files(model_dir: str) -> None:
+    """The model file and the hash civitdl wrote next to it.
+
+    The metadata in extra_data stays: it describes the version, not the file.
+    """
+    for name in os.listdir(model_dir):
+        path = os.path.join(model_dir, name)
+        if os.path.isfile(path) and DOWNLOADED_FILE_PATTERN.match(name):
+            os.remove(path)
 
 
 def _download_model_file(
@@ -487,6 +560,14 @@ def _download_model_file(
         ]
         if found and not (is_checkpoint and all(
                 _is_lora(os.path.join(model_dir, name)) for name in found)):
+            if downloaded:
+                for name in found:
+                    mismatch = _verify_download(metadata, os.path.join(model_dir, name))
+                    if mismatch:
+                        print(f"Discarding {name}: {mismatch}")
+                        session.mismatch = mismatch
+                        _remove_downloaded_files(model_dir)
+                        return
             return
         if not found:
             if downloaded:
@@ -504,12 +585,7 @@ def _download_model_file(
 
         loras.extend(found)
         session.loras = tuple(loras)
-        # The model file and the hash civitdl wrote next to it. The metadata in
-        # extra_data stays: it describes the version, not the file.
-        for name in os.listdir(model_dir):
-            path = os.path.join(model_dir, name)
-            if os.path.isfile(path) and DOWNLOADED_FILE_PATTERN.match(name):
-                os.remove(path)
+        _remove_downloaded_files(model_dir)
 
         alternative = next(alternatives, None)
         if alternative is None:
@@ -665,7 +741,7 @@ def get_safe_metadata(model_str: str) -> Dict[str, Any]:
 
 
 def _read_extra_data(
-    extra_data_path: str, version_id: Optional[int], filename: str = ""
+    extra_data_path: str, version_id: Optional[int], model_path: str = ""
 ) -> dict:
     """Read the metadata civitdl saved next to a model file.
 
@@ -715,12 +791,10 @@ def _read_extra_data(
     extra["download_count"] = stats.get("downloadCount")
     extra["thumbs_up_count"] = stats.get("thumbsUpCount")
 
-    # The file on disk is named after the version file it came from. That is
-    # the primary one, unless a checkpoint's primary file was a LoRA and
-    # _download_model_file fetched another.
+    # Usually the primary file, but not when a checkpoint's primary file was a
+    # LoRA and _download_model_file fetched another.
     files = version.get("files") or []
-    stem = re.sub(r"-mid_\d+(?:-vid_\d+)?(?=\.\w+$)", "", filename)
-    primary = next((f for f in files if filename and f.get("name") == stem), None)
+    primary = _file_entry_for(files, model_path) if model_path else None
     if primary is None:
         primary = next((f for f in files if f.get("primary")), None)
     if primary is None and files:
@@ -779,7 +853,8 @@ def find_model_files(
                     f"model_dict-mid_{found_model_id}-vid_{found_version_id}.json"
                 )
 
-                extra = _read_extra_data(extra_data_path, found_version_id, file)
+                extra = _read_extra_data(
+                    extra_data_path, found_version_id, os.path.join(root, file))
 
                 found_models.append(
                     ModelInfo(

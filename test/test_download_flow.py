@@ -1,5 +1,6 @@
 """Download failures: what gets reported, and what gets downloaded twice."""
 
+import hashlib
 import threading
 import time
 
@@ -323,13 +324,15 @@ DARKBEAST = {
             {"id": 2568709, "name": "DarkBeastZ-NVFP4.safetensors", "type": "Model",
              "primary": False, "sizeKB": 7053413, "metadata": {"fp": "nf4"}},
             {"id": 2568733, "name": "DarkBeastZ-BF16.safetensors", "type": "Model",
-             "primary": False, "sizeKB": 12021365, "metadata": {"fp": "bf16"}},
+             "primary": False, "sizeKB": len(CHECKPOINT) / 1024, "metadata": {"fp": "bf16"},
+             "hashes": {"SHA256": hashlib.sha256(CHECKPOINT).hexdigest().upper()}},
             {"id": 2568710, "name": "DarkBeastZ-fp8.safetensors", "type": "Model",
              "primary": False, "sizeKB": 7075498, "metadata": {"fp": "fp8"}},
             {"id": 2568670, "name": "trainingData.zip", "type": "Training Data",
              "primary": False, "sizeKB": 10, "metadata": {}},
             {"id": 2579659, "name": "DarkBeast5_extracted_lora_r256.safetensors", "type": "Model",
-             "primary": True, "sizeKB": 1094441, "metadata": {"fp": "fp16"}},
+             "primary": True, "sizeKB": len(LORA) / 1024, "metadata": {"fp": "fp16"},
+             "hashes": {"SHA256": hashlib.sha256(LORA).hexdigest().upper()}},
         ],
     },
 }
@@ -462,3 +465,37 @@ def test_a_lora_version_keeps_its_lora(civitdl, tmp_path):
 
     assert civitdl.call_count == 1
     assert model.filename == "DarkBeast-mid_2242173-vid_2682031.safetensors"
+
+
+
+# --- checking what civitdl wrote against Civitai ------------------------------
+
+def test_a_truncated_download_is_discarded(civitdl, tmp_path):
+    # civitdl kept whatever arrived: its strict mode never checks a download.
+    _, civitdl.side_effect = civitai_serving(tmp_path, {None: ("DarkBeastZ-BF16", CHECKPOINT[:-1])})
+
+    with checkpoint_folder(tmp_path), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"checkpoint": str(tmp_path)}), \
+            patch("requests.Session.request", return_value=MagicMock(status_code=200)):
+        with pytest.raises(HTTPException) as excinfo:
+            utils._civitdl(2242173, 2682031, "key")
+
+    assert excinfo.value.status_code == 502
+    assert "size of none" in excinfo.value.detail
+    assert not (tmp_path / "DarkBeast-mid_2242173-vid_2682031").exists()
+
+
+def test_a_corrupted_download_is_discarded(civitdl, tmp_path):
+    corrupted = CHECKPOINT[:-1] + b"\1"
+    _, civitdl.side_effect = civitai_serving(tmp_path, {None: ("DarkBeastZ-BF16", corrupted)})
+
+    with checkpoint_folder(tmp_path), \
+            patch.dict(utils.MODEL_TYPE_TO_FOLDER, {"checkpoint": str(tmp_path)}), \
+            patch("requests.Session.request", return_value=MagicMock(status_code=200)):
+        task_id = utils.create_task(2242173, 2682031)
+        utils._civitdl_async_worker(task_id, 2242173, 2682031, "key")
+
+    task = utils.get_task(task_id)
+    assert task["status"] == "failed"
+    assert "SHA256" in task["error"]
+    assert not (tmp_path / "DarkBeast-mid_2242173-vid_2682031").exists()
