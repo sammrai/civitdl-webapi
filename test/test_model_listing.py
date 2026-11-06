@@ -206,3 +206,23 @@ def test_a_version_absent_from_the_metadata_keeps_the_model_level_fields(model_r
     assert model.tags == ["style", "anime"]
     assert model.base_model is None
     assert model.created_at == ""
+
+
+def test_the_hash_is_of_the_file_on_disk_not_the_primary_one(model_root):
+    # A checkpoint whose primary file was a LoRA gets another of its files.
+    model_dir = os.path.join(model_root, "models/Stable-diffusion", "DarkBeast-mid_2242173-vid_2682031")
+    os.makedirs(os.path.join(model_dir, "extra_data-vid_2682031"))
+    with open(os.path.join(model_dir, "DarkBeastZ-BF16-mid_2242173-vid_2682031.safetensors"), "wb") as file:
+        file.write(b"weights")
+    with open(os.path.join(model_dir, "extra_data-vid_2682031", "model_dict-mid_2242173-vid_2682031.json"), "w") as file:
+        json.dump({"type": "Checkpoint", "name": "DarkBeast", "modelVersions": [{"id": 2682031, "files": [
+            {"name": "DarkBeast5_extracted_lora_r256.safetensors", "primary": True,
+             "sizeKB": 1094441, "hashes": {"SHA256": "F15C"}},
+            {"name": "DarkBeastZ-BF16.safetensors", "primary": False,
+             "sizeKB": 12021365, "hashes": {"SHA256": "A89B"}},
+        ]}]}, file)
+
+    [model] = utils.find_model_files(2242173, 2682031)
+
+    assert model.sha256 == "A89B"
+    assert model.file_size_kb == 12021365

@@ -136,6 +136,14 @@ it looks like "only this one model is broken". `_CivitaiSession` now supplies
 checkpoint (`ae.safetensors`) gets the checkpoint only — not a bug in this
 wrapper, but the file will not be there.
 
+The primary file is not always the model either. `2242173/2682031` is a
+checkpoint whose primary file is an extracted LoRA, labelled fp16 and pruned
+like the real thing; the WebUI then fails every generation with "Failed to
+recognize model type!". `_download_model_file` reads the safetensors header of
+a checkpoint's file and, when every tensor is a LoRA's, downloads the version's
+other model files in turn (`CHECKPOINT_PRECISIONS`), through `_CivitaiSession
+.file_id`. Only the header can tell: names, sizes and labels cannot.
+
 **civitdl can fail without raising.** Its retry loop catches the exception and
 returns normally, leaving no model file. Treat "finished but wrote nothing" as a
 failure, not as success.
