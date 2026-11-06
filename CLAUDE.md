@@ -144,6 +144,16 @@ a checkpoint's file and, when every tensor is a LoRA's, downloads the version's
 other model files in turn (`CHECKPOINT_PRECISIONS`), through `_CivitaiSession
 .file_id`. Only the header can tell: names, sizes and labels cannot.
 
+**civitdl never checks what it downloaded.** Its strict mode uses the hash only
+to decide whether to reuse a file it already has, and it never finds the hash
+anyway: it looks for the file whose `downloadUrl` equals the version's, and
+Civitai appends `?fileId=` to every file's. So the `.csv` it writes is empty and
+"(Strict Mode) Error with fetching SHA256 hash" is logged on every download.
+`_verify_download` checks the size and SHA256 itself. It tells which file was
+downloaded by size, not name: `sizeKB * 1024` has matched the served bytes
+exactly on every file checked, and the name comes from Content-Disposition,
+which is sometimes one Civitai makes up.
+
 **civitdl can fail without raising.** Its retry loop catches the exception and
 returns normally, leaving no model file. Treat "finished but wrote nothing" as a
 failure, not as success.
